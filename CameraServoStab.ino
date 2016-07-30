@@ -104,6 +104,7 @@ void loop() {
 
 }
 
+
 double checkServoAngle(double servoAngle) {
 	if (servoAngle > 180)
 		servoAngle = 180;
