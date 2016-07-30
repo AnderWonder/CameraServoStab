@@ -74,6 +74,36 @@ void setup() {
 
 }
 
+void loop() {
+
+	if (accelDataReady()) {
+
+		if (Z_Pid.Compute()) {
+			if (state == GO) {
+				servoAngleZ += servoStepZ;
+				servoAngleZ = checkServoAngle(servoAngleZ);
+				servoZ.write(servoAngleZ);
+			}
+
+		}
+
+		if (X_Pid.Compute()) {
+			if (state == GO) {
+				servoAngleX += servoStepX;
+				servoAngleX = checkServoAngle(servoAngleX);
+				servoX.write(servoAngleX);
+			}
+
+		}
+
+		servoY.write(map(angleY, 0, 1023, 0, 180));
+
+	}
+
+	processSerialComand();
+
+}
+
 double checkServoAngle(double servoAngle) {
 	if (servoAngle > 180)
 		servoAngle = 180;
@@ -152,36 +182,6 @@ void processSerialComand() {
 			Serial.println(X_Pid.GetKd() * k);
 		}
 	}
-
-}
-
-void loop() {
-
-	if (accelDataReady()) {
-
-		if (Z_Pid.Compute()) {
-			if (state == GO) {
-				servoAngleZ += servoStepZ;
-				servoAngleZ = checkServoAngle(servoAngleZ);
-				servoZ.write(servoAngleZ);
-			}
-
-		}
-
-		if (X_Pid.Compute()) {
-			if (state == GO) {
-				servoAngleX += servoStepX;
-				servoAngleX = checkServoAngle(servoAngleX);
-				servoX.write(servoAngleX);
-			}
-
-		}
-
-		servoY.write(map(angleY, 0, 1023, 0, 180));
-
-	}
-
-	processSerialComand();
 
 }
 
