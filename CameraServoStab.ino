@@ -9,6 +9,7 @@
 #define THRESHOLD_X 5
 #define NOISE_FILTER_VAL 0.7
 #define START_STATE GO
+
 Servo servoZ, servoY, servoX;
 
 Adafruit_ADXL345_Unified accel = Adafruit_ADXL345_Unified(12345);
