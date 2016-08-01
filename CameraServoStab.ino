@@ -12,7 +12,11 @@
 #define THRESHOLD_Z 3
 #define THRESHOLD_X 5
 #define NOISE_FILTER_VAL 0.7
-#define START_STATE GO
+#define START_STATE STOP
+
+bool show_info1 = true;
+bool show_info2 = true;
+bool show_info3 = true;
 
 Thread serial_cmd = Thread();
 
@@ -22,12 +26,10 @@ Thread get_angle_Y = Thread();
 
 Thread serial_info = Thread();
 
-void serial_Info(){
-
-}
-
 ResponsiveAnalogRead accel_X(false);
 ResponsiveAnalogRead accel_Z(false);
+
+CmdParser cmdParser;
 
 Servo servoZ, servoY, servoX;
 
@@ -60,81 +62,131 @@ int state = START_STATE;
 void get_accel_Data() {
 	accel_X.update(accel.getX());
 	accel_Z.update(accel.getZ());
-	accelX=accel_X.getValue();
-	accelZ=accel_Z.getValue();
+	accelX = accel_X.getValue();
+	accelZ = accel_Z.getValue();
 }
 
 void serial_Cmd() {
 
-	double kp, ki, kd;
+	CmdBuffer<32> cmdBuffer;
 
-	if (Serial.available()) {
-		String command = Serial.readStringUntil(' ');
-		if (command == "go") {
-			state = GO;
+	if (cmdBuffer.readFromSerial(&Serial, 0)) {
+
+		if (cmdParser.parseCmd(&cmdBuffer) != CMDPARSER_ERROR) {
+
+			if (cmdParser.equalCommand("go"))
+				state = GO;
+
+			if (cmdParser.equalCommand("st"))
+				state = STOP;
+
+			if (cmdParser.equalCommand("pid")) {
+				PID *pid;
+				if (cmdParser.equalCmdParam(0, "X"))
+					pid = &X_Pid;
+				if (cmdParser.equalCmdParam(0, "Z"))
+					pid = &Z_Pid;
+				if (pid != NULL) {
+					String k(cmdParser.equalCmdParam(1, "kp"));
+					float k_val = String(cmdParser.getValueFromKey(k.c_str())).toFloat();
+					if (k == "kp") {
+						pid->SetTunings(k_val, pid->GetKi(), pid->GetKd());
+					}
+					if (k == "kd") {
+						pid->SetTunings(pid->GetKp(), pid->GetKi(), k_val);
+					}
+					Serial.println(String("PID: kp = ") + pid->GetKp() + "; kd = " + pid->GetKd());
+				}
+			}
+
+			if (cmdParser.equalCommand("info1")) {
+				show_info1=!show_info1;
+			}
+
+			if (cmdParser.equalCommand("info2")) {
+				show_info1=!show_info2;
+			}
+
+			if (cmdParser.equalCommand("info3")) {
+				show_info1=!show_info3;
+			}
+
+			/*
+			 if (command == "go") {
+			 state = GO;
+			 }
+			 if (command == "st") {
+			 state = STOP;
+			 }
+			 int k = 10;
+			 if (command == "kpz") {
+			 kp = Serial.parseFloat() / k;
+			 Z_Pid.SetTunings(kp, Z_Pid.GetKi(), Z_Pid.GetKd());
+			 command = "infz";
+			 }
+			 if (command == "kiz") {
+			 ki = Serial.parseFloat() / k;
+			 Z_Pid.SetTunings(Z_Pid.GetKp(), ki, Z_Pid.GetKd());
+			 command = "infz";
+			 }
+			 if (command == "kdz") {
+			 kd = Serial.parseFloat() / k;
+			 Z_Pid.SetTunings(Z_Pid.GetKp(), Z_Pid.GetKi(), kd);
+			 command = "infz";
+			 }
+			 if (command == "thz") {
+			 thrZ = Serial.parseInt();
+			 }
+			 if (command == "infz") {
+			 Serial.print("Kp=");
+			 Serial.print(Z_Pid.GetKp() * k);
+			 Serial.print(";");
+			 Serial.print("Ki=");
+			 Serial.print(Z_Pid.GetKi() * k);
+			 Serial.print(";");
+			 Serial.print("Kd=");
+			 Serial.println(Z_Pid.GetKd() * k);
+			 }
+			 if (command == "kpx") {
+			 kp = Serial.parseFloat() / k;
+			 X_Pid.SetTunings(kp, X_Pid.GetKi(), X_Pid.GetKd());
+			 command = "infx";
+			 }
+			 if (command == "kix") {
+			 ki = Serial.parseFloat() / k;
+			 X_Pid.SetTunings(X_Pid.GetKp(), ki, X_Pid.GetKd());
+			 command = "infx";
+			 }
+			 if (command == "kdx") {
+			 kd = Serial.parseFloat() / k;
+			 X_Pid.SetTunings(X_Pid.GetKp(), X_Pid.GetKi(), kd);
+			 command = "infx";
+			 }
+			 if (command == "thx") {
+			 thrX = Serial.parseInt();
+			 }
+			 if (command == "infx") {
+			 Serial.print("Kp=");
+			 Serial.print(X_Pid.GetKp() * k);
+			 Serial.print(";");
+			 Serial.print("Ki=");
+			 Serial.print(X_Pid.GetKi() * k);
+			 Serial.print(";");
+			 Serial.print("Kd=");
+			 Serial.println(X_Pid.GetKd() * k);
+			 }
+			 */
+
 		}
-		if (command == "st") {
-			state = STOP;
-		}
-		int k = 10;
-		if (command == "kpz") {
-			kp = Serial.parseFloat() / k;
-			Z_Pid.SetTunings(kp, Z_Pid.GetKi(), Z_Pid.GetKd());
-			command = "infz";
-		}
-		if (command == "kiz") {
-			ki = Serial.parseFloat() / k;
-			Z_Pid.SetTunings(Z_Pid.GetKp(), ki, Z_Pid.GetKd());
-			command = "infz";
-		}
-		if (command == "kdz") {
-			kd = Serial.parseFloat() / k;
-			Z_Pid.SetTunings(Z_Pid.GetKp(), Z_Pid.GetKi(), kd);
-			command = "infz";
-		}
-		if (command == "thz") {
-			thrZ = Serial.parseInt();
-		}
-		if (command == "infz") {
-			Serial.print("Kp=");
-			Serial.print(Z_Pid.GetKp() * k);
-			Serial.print(";");
-			Serial.print("Ki=");
-			Serial.print(Z_Pid.GetKi() * k);
-			Serial.print(";");
-			Serial.print("Kd=");
-			Serial.println(Z_Pid.GetKd() * k);
-		}
-		if (command == "kpx") {
-			kp = Serial.parseFloat() / k;
-			X_Pid.SetTunings(kp, X_Pid.GetKi(), X_Pid.GetKd());
-			command = "infx";
-		}
-		if (command == "kix") {
-			ki = Serial.parseFloat() / k;
-			X_Pid.SetTunings(X_Pid.GetKp(), ki, X_Pid.GetKd());
-			command = "infx";
-		}
-		if (command == "kdx") {
-			kd = Serial.parseFloat() / k;
-			X_Pid.SetTunings(X_Pid.GetKp(), X_Pid.GetKi(), kd);
-			command = "infx";
-		}
-		if (command == "thx") {
-			thrX = Serial.parseInt();
-		}
-		if (command == "infx") {
-			Serial.print("Kp=");
-			Serial.print(X_Pid.GetKp() * k);
-			Serial.print(";");
-			Serial.print("Ki=");
-			Serial.print(X_Pid.GetKi() * k);
-			Serial.print(";");
-			Serial.print("Kd=");
-			Serial.println(X_Pid.GetKd() * k);
-		}
+
 	}
 
+}
+
+void serial_Info() {
+	if (show_info1) {
+		Serial.print(String("accel_x:") + accelX + "; accel_z:" + accelZ);
+	}
 }
 
 void setup() {
@@ -169,7 +221,7 @@ void setup() {
 	accel.setRange(ADXL345_RANGE_2_G);
 	accel.setDataRate(ADXL345_DATARATE_3200_HZ);
 
-	while (!accelDataReady());
+	//while (!accelDataReady());
 
 	serial_cmd.onRun(serial_Cmd);
 	serial_cmd.setInterval(200);
@@ -183,6 +235,7 @@ void setup() {
 	serial_info.onRun(serial_Info);
 	serial_info.setInterval(100);
 
+	cmdParser.setOptKeyValue(true);
 }
 
 void get_Angle_Y() {
@@ -243,7 +296,7 @@ void loop() {
 		}
 	}
 
-	if(serial_info.shouldRun())
+	if (serial_info.shouldRun())
 		serial_info.run();
 
 }
@@ -255,6 +308,8 @@ double checkServoAngle(double servoAngle) {
 		servoAngle = 0;
 	return servoAngle;
 }
+
+/*
 
 bool accelDataReady() {
 
@@ -310,3 +365,5 @@ double getYAngle() {
 	return YAngle;
 }
 
+
+*/
