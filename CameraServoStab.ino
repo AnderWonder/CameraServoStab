@@ -14,6 +14,21 @@
 #define NOISE_FILTER_VAL 0.7
 #define START_STATE GO
 
+Thread serial_cmd = Thread();
+
+Thread get_accel_data = Thread();
+
+Thread get_angle_Y = Thread();
+
+Thread serial_info = Thread();
+
+void serial_Info(){
+
+}
+
+ResponsiveAnalogRead accel_X(false);
+ResponsiveAnalogRead accel_Z(false);
+
 Servo servoZ, servoY, servoX;
 
 Adafruit_ADXL345_Unified accel = Adafruit_ADXL345_Unified(12345);
@@ -42,82 +57,14 @@ enum STATE {
 };
 int state = START_STATE;
 
-void setup() {
-	pinMode(A7, INPUT_PULLUP);
-
-	Serial.begin(115200);
-	Serial.println("Program start");
-
-	servoX.attach(2);
-	servoX.write(90);
-
-	servoZ.attach(3);
-	servoZ.write(90);
-
-	servoY.attach(4);
-	servoY.write(90);
-
-	Z_Pid.SetMode(AUTOMATIC);
-	Z_Pid.SetOutputLimits(-90, 90);
-	Z_Pid.SetSampleTime(avNumber * 2);
-
-	X_Pid.SetMode(AUTOMATIC);
-	X_Pid.SetOutputLimits(-90, 90);
-	X_Pid.SetSampleTime(avNumber * 2);
-
-	delay(500);
-
-	if (!accel.begin()) {
-		Serial.println("No ADXL345 detected ...");
-		while (1);
-	}
-	accel.setRange(ADXL345_RANGE_2_G);
-	accel.setDataRate(ADXL345_DATARATE_3200_HZ);
-
-	while (!accelDataReady());
-
+void get_accel_Data() {
+	accel_X.update(accel.getX());
+	accel_Z.update(accel.getZ());
+	accelX=accel_X.getValue();
+	accelZ=accel_Z.getValue();
 }
 
-void loop() {
-
-	if (accelDataReady()) {
-
-		if (Z_Pid.Compute()) {
-			if (state == GO) {
-				servoAngleZ += servoStepZ;
-				servoAngleZ = checkServoAngle(servoAngleZ);
-				servoZ.write(servoAngleZ);
-			}
-
-		}
-
-		if (X_Pid.Compute()) {
-			if (state == GO) {
-				servoAngleX += servoStepX;
-				servoAngleX = checkServoAngle(servoAngleX);
-				servoX.write(servoAngleX);
-			}
-
-		}
-
-		servoY.write(map(angleY, 0, 1023, 0, 180));
-
-	}
-
-	processSerialComand();
-
-}
-
-
-double checkServoAngle(double servoAngle) {
-	if (servoAngle > 180)
-		servoAngle = 180;
-	if (servoAngle < 0)
-		servoAngle = 0;
-	return servoAngle;
-}
-
-void processSerialComand() {
+void serial_Cmd() {
 
 	double kp, ki, kd;
 
@@ -188,6 +135,125 @@ void processSerialComand() {
 		}
 	}
 
+}
+
+void setup() {
+	pinMode(A7, INPUT_PULLUP);
+
+	Serial.begin(115200);
+	Serial.println("Program start");
+
+	servoX.attach(2);
+	servoX.write(90);
+
+	servoZ.attach(3);
+	servoZ.write(90);
+
+	servoY.attach(4);
+	servoY.write(90);
+
+	Z_Pid.SetMode(AUTOMATIC);
+	Z_Pid.SetOutputLimits(-90, 90);
+	Z_Pid.SetSampleTime(avNumber * 2);
+
+	X_Pid.SetMode(AUTOMATIC);
+	X_Pid.SetOutputLimits(-90, 90);
+	X_Pid.SetSampleTime(avNumber * 2);
+
+	delay(500);
+
+	if (!accel.begin()) {
+		Serial.println("No ADXL345 detected ...");
+		while (1);
+	}
+	accel.setRange(ADXL345_RANGE_2_G);
+	accel.setDataRate(ADXL345_DATARATE_3200_HZ);
+
+	while (!accelDataReady());
+
+	serial_cmd.onRun(serial_Cmd);
+	serial_cmd.setInterval(200);
+
+	get_accel_data.onRun(get_accel_Data);
+	get_accel_data.setInterval(1);
+
+	get_angle_Y.onRun(get_Angle_Y);
+	get_angle_Y.setInterval(100);
+
+	serial_info.onRun(serial_Info);
+	serial_info.setInterval(100);
+
+}
+
+void get_Angle_Y() {
+	angleY = analogRead(A7);
+	servoY.write(map(angleY, 0, 1023, 0, 180));
+}
+
+void loop() {
+
+	/*
+	 if (accelDataReady()) {
+
+	 if (Z_Pid.Compute()) {
+	 if (state == GO) {
+	 servoAngleZ += servoStepZ;
+	 servoAngleZ = checkServoAngle(servoAngleZ);
+	 servoZ.write(servoAngleZ);
+	 }
+
+	 }
+
+	 if (X_Pid.Compute()) {
+	 if (state == GO) {
+	 servoAngleX += servoStepX;
+	 servoAngleX = checkServoAngle(servoAngleX);
+	 servoX.write(servoAngleX);
+	 }
+
+	 }
+
+	 servoY.write(map(angleY, 0, 1023, 0, 180));
+
+	 }
+	 */
+
+	if (serial_cmd.shouldRun())
+		serial_cmd.run();
+
+	if (get_accel_data.shouldRun())
+		get_accel_data.run();
+
+	if (get_angle_Y.shouldRun())
+		get_angle_Y.run();
+
+	if (Z_Pid.Compute()) {
+		if (state == GO) {
+			servoAngleZ += servoStepZ;
+			servoAngleZ = checkServoAngle(servoAngleZ);
+			servoZ.write(servoAngleZ);
+		}
+	}
+
+	if (X_Pid.Compute()) {
+		if (state == GO) {
+			servoAngleX += servoStepX;
+			servoAngleX = checkServoAngle(servoAngleX);
+			servoX.write(servoAngleX);
+		}
+	}
+
+	if(serial_info.shouldRun())
+		serial_info.run();
+
+}
+
+double checkServoAngle(double servoAngle) {
+	if (servoAngle > 180)
+		servoAngle = 180;
+	if (servoAngle < 0)
+		servoAngle = 0;
+	return servoAngle;
 }
 
 bool accelDataReady() {
