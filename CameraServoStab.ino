@@ -6,17 +6,17 @@
 #include <Thread.h>
 #include <ResponsiveAnalogRead.h>
 
-#define AVERAGE_COUNT_AMOUNT 10
+#define AVERAGE_AMOUNT 10
 #define AIM_FOR_X 0
-#define AIM_FOR_Z -15
+#define AIM_FOR_Z -20
 #define THRESHOLD_Z 3
 #define THRESHOLD_X 5
 #define NOISE_FILTER_VAL 0.7
 #define START_STATE STOP
 
-bool show_info1 = true;
-bool show_info2 = true;
-bool show_info3 = true;
+bool show_info1 = false;
+bool show_info2 = false;
+bool show_info3 = false;
 
 Thread serial_cmd = Thread();
 
@@ -26,8 +26,9 @@ Thread get_angle_Y = Thread();
 
 Thread serial_info = Thread();
 
-ResponsiveAnalogRead accel_X(false);
-ResponsiveAnalogRead accel_Z(false);
+ResponsiveAnalogRead accel_X(false, .01);
+ResponsiveAnalogRead accel_Z(false, .01);
+ResponsiveAnalogRead angle_Y(false, .01);
 
 CmdParser cmdParser;
 
@@ -37,13 +38,13 @@ Adafruit_ADXL345_Unified accel = Adafruit_ADXL345_Unified(12345);
 
 double accelZ, _accelZ = 0;
 double aimAccelZ = AIM_FOR_Z;
-double servoAngleZ, servoStepZ;
-PID Z_Pid(&accelZ, &servoStepZ, &aimAccelZ, .025, 0, 0.001, REVERSE);
+double servoAngleZ = 90, servoStepZ;
+PID Z_Pid(&accelZ, &servoStepZ, &aimAccelZ, .012, 0, 0.0001, REVERSE);
 
 double accelX, _accelX = 0;
 double aimAccelX = AIM_FOR_X;
-double servoAngleX, servoStepX;
-PID X_Pid(&accelX, &servoStepX, &aimAccelX, .025, 0, 0.001, REVERSE);
+double servoAngleX = 90, servoStepX;
+PID X_Pid(&accelX, &servoStepX, &aimAccelX, .013, 0, 0.0001, REVERSE);
 
 double accelY, _accelY = 0;
 
@@ -51,13 +52,15 @@ long angleY, _angleY = 0;
 
 byte thrX = THRESHOLD_X, thrZ = THRESHOLD_Z;
 
-int avNumber = AVERAGE_COUNT_AMOUNT;
+int avNumber = AVERAGE_AMOUNT;
 int avCounter = 0;
 
 enum STATE {
 	GO, STOP
 };
 int state = START_STATE;
+
+int kf = 10;
 
 void get_accel_Data() {
 	accel_X.update(accel.getX());
@@ -70,7 +73,9 @@ void serial_Cmd() {
 
 	CmdBuffer<32> cmdBuffer;
 
-	if (cmdBuffer.readFromSerial(&Serial, 0)) {
+	cmdBuffer.setEndChar(CMDBUFFER_CHAR_CR);
+
+	if (cmdBuffer.readFromSerial(&Serial, 1)) {
 
 		if (cmdParser.parseCmd(&cmdBuffer) != CMDPARSER_ERROR) {
 
@@ -82,33 +87,53 @@ void serial_Cmd() {
 
 			if (cmdParser.equalCommand("pid")) {
 				PID *pid;
-				if (cmdParser.equalCmdParam(0, "X"))
+				pid = NULL;
+				if (cmdParser.equalCmdParam(1, "X"))
 					pid = &X_Pid;
-				if (cmdParser.equalCmdParam(0, "Z"))
+				if (cmdParser.equalCmdParam(1, "Z"))
 					pid = &Z_Pid;
+				if (cmdParser.equalCmdParam(1, "kf")) {
+					kf =
+							String(cmdParser.getValueFromKey(cmdParser.getCmdParam(1))).toInt();
+					Serial.println(String("kf=") + kf);
+				}
 				if (pid != NULL) {
-					String k(cmdParser.equalCmdParam(1, "kp"));
+					String k(cmdParser.getCmdParam(2));
 					float k_val = String(cmdParser.getValueFromKey(k.c_str())).toFloat();
+					k_val /= kf;
 					if (k == "kp") {
 						pid->SetTunings(k_val, pid->GetKi(), pid->GetKd());
 					}
 					if (k == "kd") {
 						pid->SetTunings(pid->GetKp(), pid->GetKi(), k_val);
 					}
-					Serial.println(String("PID: kp = ") + pid->GetKp() + "; kd = " + pid->GetKd());
+					Serial.println(
+							String("PID: kf = ") + kf + "; kp = " + pid->GetKp() * kf
+									+ "; kd = " + pid->GetKd() * kf);
 				}
 			}
 
 			if (cmdParser.equalCommand("info1")) {
-				show_info1=!show_info1;
+				show_info1 = !show_info1;
 			}
 
 			if (cmdParser.equalCommand("info2")) {
-				show_info1=!show_info2;
+				show_info2 = !show_info2;
 			}
 
 			if (cmdParser.equalCommand("info3")) {
-				show_info1=!show_info3;
+				show_info3 = !show_info3;
+			}
+
+			if (cmdParser.equalCommand("aim")) {
+				int aim_val = String(
+						cmdParser.getValueFromKey(cmdParser.getCmdParam(1))).toInt();
+				if (cmdParser.equalCmdParam(1, "X")) {
+					aimAccelX = aim_val;
+				}
+				if (cmdParser.equalCmdParam(1, "Z")) {
+					aimAccelZ = aim_val;
+				}
 			}
 
 			/*
@@ -178,6 +203,8 @@ void serial_Cmd() {
 			 */
 
 		}
+		else
+			Serial.println("Error parsing cmd!");
 
 	}
 
@@ -185,14 +212,17 @@ void serial_Cmd() {
 
 void serial_Info() {
 	if (show_info1) {
-		Serial.print(String("accel_x:") + accelX + "; accel_z:" + accelZ);
+		Serial.println(String("accel_x: ") + accelX + "; accel_z: " + accelZ);
+	}
+	if (show_info2) {
+		Serial.println(String("angle_y: ") + angleY);
 	}
 }
 
 void setup() {
 	pinMode(A7, INPUT_PULLUP);
 
-	Serial.begin(115200);
+	Serial.begin(9600);
 	Serial.println("Program start");
 
 	servoX.attach(2);
@@ -206,18 +236,20 @@ void setup() {
 
 	Z_Pid.SetMode(AUTOMATIC);
 	Z_Pid.SetOutputLimits(-90, 90);
-	Z_Pid.SetSampleTime(avNumber * 2);
+	Z_Pid.SetSampleTime(20);
 
 	X_Pid.SetMode(AUTOMATIC);
 	X_Pid.SetOutputLimits(-90, 90);
-	X_Pid.SetSampleTime(avNumber * 2);
+	X_Pid.SetSampleTime(20);
 
 	delay(500);
 
 	if (!accel.begin()) {
 		Serial.println("No ADXL345 detected ...");
-		while (1);
+		while (1)
+			;
 	}
+
 	accel.setRange(ADXL345_RANGE_2_G);
 	accel.setDataRate(ADXL345_DATARATE_3200_HZ);
 
@@ -230,17 +262,23 @@ void setup() {
 	get_accel_data.setInterval(1);
 
 	get_angle_Y.onRun(get_Angle_Y);
-	get_angle_Y.setInterval(100);
+	get_angle_Y.setInterval(10);
 
 	serial_info.onRun(serial_Info);
 	serial_info.setInterval(100);
 
 	cmdParser.setOptKeyValue(true);
+
+	angle_Y.setAverageAmount(30);
+	accel_X.setAverageAmount(10);
+	accel_Z.setAverageAmount(10);
 }
 
 void get_Angle_Y() {
-	angleY = analogRead(A7);
-	servoY.write(map(angleY, 0, 1023, 0, 180));
+	if (angle_Y.hasChanged()) {
+		angleY = angle_Y.getValue();
+		servoY.write(map(angleY, 0, 1023, 0, 180));
+	}
 }
 
 void loop() {
@@ -271,6 +309,8 @@ void loop() {
 	 }
 	 */
 
+	angle_Y.update(getYAngle());
+
 	if (serial_cmd.shouldRun())
 		serial_cmd.run();
 
@@ -282,17 +322,21 @@ void loop() {
 
 	if (Z_Pid.Compute()) {
 		if (state == GO) {
-			servoAngleZ += servoStepZ;
-			servoAngleZ = checkServoAngle(servoAngleZ);
-			servoZ.write(servoAngleZ);
+			if (abs(accelZ-aimAccelZ) > THRESHOLD_Z) {
+				servoAngleZ += servoStepZ;
+				servoAngleZ = checkServoAngle(servoAngleZ);
+				servoZ.write(servoAngleZ);
+			}
 		}
 	}
 
 	if (X_Pid.Compute()) {
 		if (state == GO) {
-			servoAngleX += servoStepX;
-			servoAngleX = checkServoAngle(servoAngleX);
-			servoX.write(servoAngleX);
+			if (abs(accelX-aimAccelX) > THRESHOLD_X) {
+				servoAngleX += servoStepX;
+				servoAngleX = checkServoAngle(servoAngleX);
+				servoX.write(servoAngleX);
+			}
 		}
 	}
 
@@ -311,59 +355,57 @@ double checkServoAngle(double servoAngle) {
 
 /*
 
-bool accelDataReady() {
+ bool accelDataReady() {
 
-	bool result;
+ bool result;
 
-	double filter = NOISE_FILTER_VAL;
+ double filter = NOISE_FILTER_VAL;
 
-	if (avCounter < avNumber) {
-		_accelZ += accel.getZ();
-		_accelX += accel.getX();
-		_accelY += accel.getY();
-		_angleY += getYAngle();
+ if (avCounter < avNumber) {
+ _accelZ += accel.getZ();
+ _accelX += accel.getX();
+ _accelY += accel.getY();
+ _angleY += getYAngle();
 
-		avCounter++;
-		result = false;
-	} else {
+ avCounter++;
+ result = false;
+ } else {
 
-		avCounter = 0;
+ avCounter = 0;
 
-		_accelZ /= avNumber;
-		_accelX /= avNumber;
-		_accelY /= avNumber;
-		_angleY /= avNumber;
+ _accelZ /= avNumber;
+ _accelX /= avNumber;
+ _accelY /= avNumber;
+ _angleY /= avNumber;
 
-		accelZ = accelZ * filter + (1.0 - filter) * _accelZ;
+ accelZ = accelZ * filter + (1.0 - filter) * _accelZ;
 
-		accelX = accelX * filter + (1.0 - filter) * _accelX;
+ accelX = accelX * filter + (1.0 - filter) * _accelX;
 
-		angleY = angleY * filter + (1.0 - filter) * _angleY;
+ angleY = angleY * filter + (1.0 - filter) * _angleY;
 
-		if (abs(accelZ - aimAccelZ) <= thrZ)
-			accelZ = aimAccelZ;
+ if (abs(accelZ - aimAccelZ) <= thrZ)
+ accelZ = aimAccelZ;
 
-		if (abs(accelX - aimAccelX) <= thrX)
-			accelX = aimAccelX;
+ if (abs(accelX - aimAccelX) <= thrX)
+ accelX = aimAccelX;
 
-		_accelZ = 0;
-		_accelX = 0;
-		_accelY = 0;
-		_angleY = 0;
+ _accelZ = 0;
+ _accelX = 0;
+ _accelY = 0;
+ _angleY = 0;
 
-		result = true;
+ result = true;
 
-	}
+ }
 
-	return result;
+ return result;
 
-}
-
+ }
+ */
 double getYAngle() {
 	double YAngle = analogRead(A7);
 	delayMicroseconds(200); //is necessary because analogRead breaks I2C so must wait
 	return YAngle;
 }
 
-
-*/
