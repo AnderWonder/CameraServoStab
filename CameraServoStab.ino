@@ -1,6 +1,10 @@
 #include <Adafruit_ADXL345_U.h>
 #include <Servo.h>
 #include <PID_v1.h>
+#include <../SE8R01/se8r01.h>
+#include <CmdParser.hpp>
+#include <Thread.h>
+#include <ResponsiveAnalogRead.h>
 
 #define AVERAGE_COUNT_AMOUNT 10
 #define AIM_FOR_X 0
