@@ -72,6 +72,8 @@ byte rx_data[] = { "-10;-10;0" };
 
 bool got_radio = false;
 
+int button_state=0;
+
 void init_radio() {
 	if (!init_rf(10, 7, 8, sizeof(rx_data))) {
 		Serial.println("Radio chip not found!");
@@ -261,8 +263,6 @@ void radio_Cmd() {
 		Y_moving_direction = Y_moving_val >= 0 ? -1 : 1;
 		Y_moving_speed = abs(Y_moving_val);
 		if (Y_moving_speed > 1) {
-			//Serial.println(
-			//		String("Y dir:") + Y_moving_direction + " Y speed:" + Y_moving_speed);
 			if (Y_moving_speed > 8)
 				Y_moving_speed = 5;
 			else if (Y_moving_speed > 4)
@@ -281,8 +281,6 @@ void radio_Cmd() {
 		int X_moving_val = radio_cmd.substring(0, radio_cmd.indexOf(';')).toInt();
 		X_moving_direction = X_moving_val >= 0 ? -5 : 5;
 		X_moving_speed = abs(X_moving_val);
-		Serial.println(
-				String("X dir:") + X_moving_direction + " X speed:" + X_moving_speed);
 		if (X_moving_speed > 2) {
 			if (X_moving_speed > 7) {
 				X_moving.setInterval(20);
@@ -294,6 +292,20 @@ void radio_Cmd() {
 		else {
 			X_moving.enabled = false;
 		}
+
+
+		radio_cmd = radio_cmd.substring(radio_cmd.indexOf(';') + 1);
+		int button_now = radio_cmd.toInt();
+		if(button_state&&!button_now){//clicked
+			if(state==GO)state=STOP;
+			else {
+				aimAccelX=accelX;
+				state=GO;
+			}
+		}
+		button_state=button_now;
+
+
 		got_radio = false;
 	}
 }
@@ -310,7 +322,6 @@ void X_Moving() {
 		aimAccelX = 250;
 	if (aimAccelX < -250)
 		aimAccelX = -250;
-	Serial.println(aimAccelX);
 }
 
 void radio_ISR() {
