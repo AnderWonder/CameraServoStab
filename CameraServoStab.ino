@@ -12,6 +12,7 @@
 #define THRESHOLD_Z 3
 #define THRESHOLD_X 3
 #define START_STATE GO
+#define LONG_PRESS_DELAY 2000
 
 bool show_info1 = false;
 bool show_info2 = false;
@@ -33,7 +34,6 @@ Thread X_moving = Thread();
 
 ResponsiveAnalogRead accel_X(false, .01);
 ResponsiveAnalogRead accel_Z(false, .01);
-ResponsiveAnalogRead angle_Y(A7, false, .01);
 
 CmdParser cmdParser;
 
@@ -51,7 +51,6 @@ double aimAccelX = AIM_FOR_X;
 double servoAngleX = 90, servoStepX;
 PID X_Pid(&accelX, &servoStepX, &aimAccelX, .02, 0, 0.0005, REVERSE);
 
-int angleY = 0;
 int Y_moving_speed = 0;
 int Y_moving_direction = 0;
 int servoAngleY = 90;
@@ -68,11 +67,17 @@ int state = START_STATE;
 
 int kf = 1;
 
-byte rx_data[] = { "-10;-10;0" };
+byte rx_data[] = { "-10;-10;0;0;0;0;" };
 
 bool got_radio = false;
 
-int button_state=0;
+int button_0_state = 0;
+int button_1_state = 0;
+unsigned long button_1_time;
+int button_2_state = 0;
+unsigned long button_2_time;
+int button_3_state = 0;
+unsigned long button_3_time;
 
 void init_radio() {
 	if (!init_rf(10, 7, 8, sizeof(rx_data))) {
@@ -239,19 +244,11 @@ void serial_Info() {
 		Serial.println(String("accel_x: ") + accelX + "; accel_z: " + accelZ);
 	}
 	if (show_info2) {
-		Serial.println(String("angle_y: ") + angleY);
 	}
 	if (show_info3) {
 		Serial.print("Received by radio:");
 		Serial.println(String((char*) rx_data));
 		show_info3 = false;
-	}
-}
-
-void get_Angle_Y() {
-	if (angle_Y.hasChanged()) {
-		angleY = angle_Y.getValue();
-		servoY.write(map(angleY, 0, 1023, 0, 180));
 	}
 }
 
@@ -293,18 +290,68 @@ void radio_Cmd() {
 			X_moving.enabled = false;
 		}
 
-
 		radio_cmd = radio_cmd.substring(radio_cmd.indexOf(';') + 1);
-		int button_now = radio_cmd.toInt();
-		if(button_state&&!button_now){//clicked
-			if(state==GO)state=STOP;
+		int button_0_now = radio_cmd.substring(0, radio_cmd.indexOf(';')).toInt();
+		if (button_0_state && !button_0_now) { //clicked
+			if (state == GO)
+				state = STOP;
 			else {
-				aimAccelX=accelX;
-				state=GO;
+				aimAccelX = accelX;
+				state = GO;
 			}
 		}
-		button_state=button_now;
+		button_0_state = button_0_now;
 
+		radio_cmd = radio_cmd.substring(radio_cmd.indexOf(';') + 1);
+		int button_1_now = radio_cmd.substring(0, radio_cmd.indexOf(';')).toInt();
+		if (button_1_now != button_1_state) {
+			if (button_1_now) { //pressed
+				button_1_time = millis();
+			}
+			else { //released
+				if (millis() - button_1_time > LONG_PRESS_DELAY) {
+					Serial.println("Button 1 - long press");
+				}
+				else {
+					Serial.println("Button 1 - clicked");
+				}
+			}
+		}
+		button_1_state = button_1_now;
+
+		radio_cmd = radio_cmd.substring(radio_cmd.indexOf(';') + 1);
+		int button_2_now = radio_cmd.substring(0, radio_cmd.indexOf(';')).toInt();
+		if (button_2_now != button_2_state) {
+			if (button_2_now) { //pressed
+				button_2_time = millis();
+			}
+			else { //released
+				if (millis() - button_2_time > LONG_PRESS_DELAY) {
+					Serial.println("Button 2 - long press");
+				}
+				else {
+					Serial.println("Button 2 - clicked");
+				}
+			}
+		}
+		button_2_state = button_2_now;
+
+		radio_cmd = radio_cmd.substring(radio_cmd.indexOf(';') + 1);
+		int button_3_now = radio_cmd.substring(0, radio_cmd.indexOf(';')).toInt();
+		if (button_3_now != button_3_state) {
+			if (button_3_now) { //pressed
+				button_3_time = millis();
+			}
+			else { //released
+				if (millis() - button_3_time > LONG_PRESS_DELAY) {
+					Serial.println("Button 3 - long press");
+				}
+				else {
+					Serial.println("Button 3 - clicked");
+				}
+			}
+		}
+		button_3_state = button_3_now;
 
 		got_radio = false;
 	}
@@ -365,9 +412,6 @@ void setup() {
 	get_accel_data.onRun(get_accel_Data);
 	get_accel_data.setInterval(1);
 
-	get_angle_Y.onRun(get_Angle_Y);
-	get_angle_Y.setInterval(10);
-
 	serial_info.onRun(serial_Info);
 	serial_info.setInterval(100);
 
@@ -383,7 +427,6 @@ void setup() {
 
 	cmdParser.setOptKeyValue(true);
 
-	angle_Y.setAverageAmount(30);
 	accel_X.setAverageAmount(10);
 	accel_Z.setAverageAmount(10);
 
@@ -393,16 +436,11 @@ void setup() {
 
 void loop() {
 
-	angle_Y.update();
-
 	if (serial_cmd.shouldRun())
 		serial_cmd.run();
 
 	if (get_accel_data.shouldRun())
 		get_accel_data.run();
-
-	//if (get_angle_Y.shouldRun())
-	//	get_angle_Y.run();
 
 	if (Z_Pid.Compute()) {
 		if (state == GO) {
