@@ -29,6 +29,8 @@ Thread radio_cmd = Thread();
 
 Thread Y_moving = Thread();
 
+Thread X_moving = Thread();
+
 ResponsiveAnalogRead accel_X(false, .01);
 ResponsiveAnalogRead accel_Z(false, .01);
 ResponsiveAnalogRead angle_Y(A7, false, .01);
@@ -47,12 +49,15 @@ PID Z_Pid(&accelZ, &servoStepZ, &aimAccelZ, .02, 0, 0.0005, REVERSE);
 double accelX;
 double aimAccelX = AIM_FOR_X;
 double servoAngleX = 90, servoStepX;
-PID X_Pid(&accelX, &servoStepX, &aimAccelX, .03, 0, 0.0005, REVERSE);
+PID X_Pid(&accelX, &servoStepX, &aimAccelX, .02, 0, 0.0005, REVERSE);
 
 int angleY = 0;
 int Y_moving_speed = 0;
 int Y_moving_direction = 0;
 int servoAngleY = 90;
+
+int X_moving_speed = 0;
+int X_moving_direction = 0;
 
 byte thrX = THRESHOLD_X, thrZ = THRESHOLD_Z;
 
@@ -251,12 +256,13 @@ void get_Angle_Y() {
 void radio_Cmd() {
 	if (got_radio) {
 		String radio_cmd = String((char*) rx_data);
+
 		int Y_moving_val = radio_cmd.substring(0, radio_cmd.indexOf(';')).toInt();
 		Y_moving_direction = Y_moving_val >= 0 ? -1 : 1;
 		Y_moving_speed = abs(Y_moving_val);
 		if (Y_moving_speed > 1) {
-			Serial.println(
-					String("Y dir:") + Y_moving_direction + " Y speed:" + Y_moving_speed);
+			//Serial.println(
+			//		String("Y dir:") + Y_moving_direction + " Y speed:" + Y_moving_speed);
 			if (Y_moving_speed > 8)
 				Y_moving_speed = 5;
 			else if (Y_moving_speed > 4)
@@ -270,6 +276,24 @@ void radio_Cmd() {
 		else {
 			Y_moving.enabled = false;
 		}
+
+		radio_cmd = radio_cmd.substring(radio_cmd.indexOf(';') + 1);
+		int X_moving_val = radio_cmd.substring(0, radio_cmd.indexOf(';')).toInt();
+		X_moving_direction = X_moving_val >= 0 ? -5 : 5;
+		X_moving_speed = abs(X_moving_val);
+		Serial.println(
+				String("X dir:") + X_moving_direction + " X speed:" + X_moving_speed);
+		if (X_moving_speed > 2) {
+			if (X_moving_speed > 7) {
+				X_moving.setInterval(20);
+			}
+			else
+				X_moving.setInterval(50);
+			X_moving.enabled = true;
+		}
+		else {
+			X_moving.enabled = false;
+		}
 		got_radio = false;
 	}
 }
@@ -278,6 +302,15 @@ void Y_Moving() {
 	servoAngleY += Y_moving_direction;
 	servoAngleY = checkServoAngle(servoAngleY);
 	servoY.write(servoAngleY);
+}
+
+void X_Moving() {
+	aimAccelX += X_moving_direction;
+	if (aimAccelX > 250)
+		aimAccelX = 250;
+	if (aimAccelX < -250)
+		aimAccelX = -250;
+	Serial.println(aimAccelX);
 }
 
 void radio_ISR() {
@@ -330,6 +363,10 @@ void setup() {
 	Y_moving.onRun(Y_Moving);
 	Y_moving.enabled = false;
 
+	X_moving.onRun(X_Moving);
+	X_moving.setInterval(100);
+	X_moving.enabled = false;
+
 	radio_cmd.onRun(radio_Cmd);
 	radio_cmd.setInterval(100);
 
@@ -368,7 +405,7 @@ void loop() {
 
 	if (X_Pid.Compute()) {
 		if (state == GO) {
-			if (abs(accelZ-aimAccelZ) > thrX) {
+			if (abs(accelX-aimAccelX) > thrX) {
 				servoAngleX += servoStepX;
 				servoAngleX = checkServoAngle(servoAngleX);
 				servoX.write(servoAngleX);
@@ -381,6 +418,9 @@ void loop() {
 
 	if (Y_moving.shouldRun())
 		Y_moving.run();
+
+	if (X_moving.shouldRun())
+		X_moving.run();
 
 	if (radio_cmd.shouldRun())
 		radio_cmd.run();
