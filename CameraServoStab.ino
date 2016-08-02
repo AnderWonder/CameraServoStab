@@ -6,12 +6,10 @@
 #include <Thread.h>
 #include <ResponsiveAnalogRead.h>
 
-#define AVERAGE_AMOUNT 10
 #define AIM_FOR_X 0
 #define AIM_FOR_Z -20
 #define THRESHOLD_Z 3
-#define THRESHOLD_X 5
-#define NOISE_FILTER_VAL 0.7
+#define THRESHOLD_X 3
 #define START_STATE STOP
 
 bool show_info1 = false;
@@ -28,7 +26,7 @@ Thread serial_info = Thread();
 
 ResponsiveAnalogRead accel_X(false, .01);
 ResponsiveAnalogRead accel_Z(false, .01);
-ResponsiveAnalogRead angle_Y(false, .01);
+ResponsiveAnalogRead angle_Y(A7, false, .01);
 
 CmdParser cmdParser;
 
@@ -36,37 +34,32 @@ Servo servoZ, servoY, servoX;
 
 Adafruit_ADXL345_Unified accel = Adafruit_ADXL345_Unified(12345);
 
-double accelZ, _accelZ = 0;
+double accelZ;
 double aimAccelZ = AIM_FOR_Z;
 double servoAngleZ = 90, servoStepZ;
-PID Z_Pid(&accelZ, &servoStepZ, &aimAccelZ, .012, 0, 0.0001, REVERSE);
+PID Z_Pid(&accelZ, &servoStepZ, &aimAccelZ, .02, 0, 0.0005, REVERSE);
 
-double accelX, _accelX = 0;
+double accelX;
 double aimAccelX = AIM_FOR_X;
 double servoAngleX = 90, servoStepX;
-PID X_Pid(&accelX, &servoStepX, &aimAccelX, .013, 0, 0.0001, REVERSE);
+PID X_Pid(&accelX, &servoStepX, &aimAccelX, .03, 0, 0.0005, REVERSE);
 
-double accelY, _accelY = 0;
-
-long angleY, _angleY = 0;
+int angleY = 0;
 
 byte thrX = THRESHOLD_X, thrZ = THRESHOLD_Z;
-
-int avNumber = AVERAGE_AMOUNT;
-int avCounter = 0;
 
 enum STATE {
 	GO, STOP
 };
 int state = START_STATE;
 
-int kf = 10;
+int kf = 1;
 
 void get_accel_Data() {
 	accel_X.update(accel.getX());
 	accel_Z.update(accel.getZ());
-	accelX = accel_X.getValue();
 	accelZ = accel_Z.getValue();
+	accelX = accel_X.getValue();
 }
 
 void serial_Cmd() {
@@ -220,19 +213,12 @@ void serial_Info() {
 }
 
 void setup() {
-	pinMode(A7, INPUT_PULLUP);
-
 	Serial.begin(9600);
 	Serial.println("Program start");
 
 	servoX.attach(2);
-	servoX.write(90);
-
 	servoZ.attach(3);
-	servoZ.write(90);
-
 	servoY.attach(4);
-	servoY.write(90);
 
 	Z_Pid.SetMode(AUTOMATIC);
 	Z_Pid.SetOutputLimits(-90, 90);
@@ -249,11 +235,8 @@ void setup() {
 		while (1)
 			;
 	}
-
 	accel.setRange(ADXL345_RANGE_2_G);
 	accel.setDataRate(ADXL345_DATARATE_3200_HZ);
-
-	//while (!accelDataReady());
 
 	serial_cmd.onRun(serial_Cmd);
 	serial_cmd.setInterval(200);
@@ -283,33 +266,7 @@ void get_Angle_Y() {
 
 void loop() {
 
-	/*
-	 if (accelDataReady()) {
-
-	 if (Z_Pid.Compute()) {
-	 if (state == GO) {
-	 servoAngleZ += servoStepZ;
-	 servoAngleZ = checkServoAngle(servoAngleZ);
-	 servoZ.write(servoAngleZ);
-	 }
-
-	 }
-
-	 if (X_Pid.Compute()) {
-	 if (state == GO) {
-	 servoAngleX += servoStepX;
-	 servoAngleX = checkServoAngle(servoAngleX);
-	 servoX.write(servoAngleX);
-	 }
-
-	 }
-
-	 servoY.write(map(angleY, 0, 1023, 0, 180));
-
-	 }
-	 */
-
-	angle_Y.update(getYAngle());
+	angle_Y.update();
 
 	if (serial_cmd.shouldRun())
 		serial_cmd.run();
@@ -322,7 +279,7 @@ void loop() {
 
 	if (Z_Pid.Compute()) {
 		if (state == GO) {
-			if (abs(accelZ-aimAccelZ) > THRESHOLD_Z) {
+			if (abs(accelZ-aimAccelZ) > thrZ) {
 				servoAngleZ += servoStepZ;
 				servoAngleZ = checkServoAngle(servoAngleZ);
 				servoZ.write(servoAngleZ);
@@ -332,7 +289,7 @@ void loop() {
 
 	if (X_Pid.Compute()) {
 		if (state == GO) {
-			if (abs(accelX-aimAccelX) > THRESHOLD_X) {
+			if (abs(accelZ-aimAccelZ) > thrX) {
 				servoAngleX += servoStepX;
 				servoAngleX = checkServoAngle(servoAngleX);
 				servoX.write(servoAngleX);
@@ -351,61 +308,5 @@ double checkServoAngle(double servoAngle) {
 	if (servoAngle < 0)
 		servoAngle = 0;
 	return servoAngle;
-}
-
-/*
-
- bool accelDataReady() {
-
- bool result;
-
- double filter = NOISE_FILTER_VAL;
-
- if (avCounter < avNumber) {
- _accelZ += accel.getZ();
- _accelX += accel.getX();
- _accelY += accel.getY();
- _angleY += getYAngle();
-
- avCounter++;
- result = false;
- } else {
-
- avCounter = 0;
-
- _accelZ /= avNumber;
- _accelX /= avNumber;
- _accelY /= avNumber;
- _angleY /= avNumber;
-
- accelZ = accelZ * filter + (1.0 - filter) * _accelZ;
-
- accelX = accelX * filter + (1.0 - filter) * _accelX;
-
- angleY = angleY * filter + (1.0 - filter) * _angleY;
-
- if (abs(accelZ - aimAccelZ) <= thrZ)
- accelZ = aimAccelZ;
-
- if (abs(accelX - aimAccelX) <= thrX)
- accelX = aimAccelX;
-
- _accelZ = 0;
- _accelX = 0;
- _accelY = 0;
- _angleY = 0;
-
- result = true;
-
- }
-
- return result;
-
- }
- */
-double getYAngle() {
-	double YAngle = analogRead(A7);
-	delayMicroseconds(200); //is necessary because analogRead breaks I2C so must wait
-	return YAngle;
 }
 
