@@ -1,10 +1,11 @@
 #include <Adafruit_ADXL345_U.h>
 #include <Servo.h>
 #include <PID_v1.h>
-#include <../SE8R01/se8r01.h>
+#include <se8r01.h>
 #include <CmdParser.hpp>
 #include <Thread.h>
 #include <ResponsiveAnalogRead.h>
+#include <PinChangeInterrupt.h>
 
 #define AIM_FOR_X 0
 #define AIM_FOR_Z -20
@@ -14,7 +15,7 @@
 
 bool show_info1 = false;
 bool show_info2 = false;
-bool show_info3 = false;
+bool show_info3 = true;
 
 Thread serial_cmd = Thread();
 
@@ -55,6 +56,20 @@ int state = START_STATE;
 
 int kf = 1;
 
+byte rxData[] = { "-10;-10;0" };
+
+void init_radio() {
+	if (!init_rf(10, 7, 8, sizeof(rxData))) {
+		Serial.println("Radio chip not found!");
+	}
+	else {
+		Serial.println("Radio connected");
+		changeMode(RX_MODE);
+		setChannel(110);
+	}
+}
+
+//********************************* THREADS
 void get_accel_Data() {
 	accel_X.update(accel.getX());
 	accel_Z.update(accel.getZ());
@@ -210,7 +225,20 @@ void serial_Info() {
 	if (show_info2) {
 		Serial.println(String("angle_y: ") + angleY);
 	}
+	if (show_info3){
+		Serial.print("Received by radio:");
+		Serial.println(String((char*) rxData));
+		show_info3=false;
+	}
 }
+
+void get_Angle_Y() {
+	if (angle_Y.hasChanged()) {
+		angleY = angle_Y.getValue();
+		servoY.write(map(angleY, 0, 1023, 0, 180));
+	}
+}
+//********************************* THREADS
 
 void setup() {
 	Serial.begin(9600);
@@ -255,12 +283,15 @@ void setup() {
 	angle_Y.setAverageAmount(30);
 	accel_X.setAverageAmount(10);
 	accel_Z.setAverageAmount(10);
+
+	init_radio();
+	attachPCINT(digitalPinToPCINT(8), radio_ISR, CHANGE);
 }
 
-void get_Angle_Y() {
-	if (angle_Y.hasChanged()) {
-		angleY = angle_Y.getValue();
-		servoY.write(map(angleY, 0, 1023, 0, 180));
+void radio_ISR() {
+	if (digitalRead(IRQ_pin) == LOW) {
+		getRxData(rxData);
+		show_info3=true;
 	}
 }
 
