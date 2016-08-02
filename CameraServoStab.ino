@@ -11,11 +11,11 @@
 #define AIM_FOR_Z -20
 #define THRESHOLD_Z 3
 #define THRESHOLD_X 3
-#define START_STATE STOP
+#define START_STATE GO
 
 bool show_info1 = false;
 bool show_info2 = false;
-bool show_info3 = true;
+bool show_info3 = false;
 
 Thread serial_cmd = Thread();
 
@@ -24,6 +24,10 @@ Thread get_accel_data = Thread();
 Thread get_angle_Y = Thread();
 
 Thread serial_info = Thread();
+
+Thread radio_cmd = Thread();
+
+Thread Y_moving = Thread();
 
 ResponsiveAnalogRead accel_X(false, .01);
 ResponsiveAnalogRead accel_Z(false, .01);
@@ -46,6 +50,9 @@ double servoAngleX = 90, servoStepX;
 PID X_Pid(&accelX, &servoStepX, &aimAccelX, .03, 0, 0.0005, REVERSE);
 
 int angleY = 0;
+int Y_moving_speed = 0;
+int Y_moving_direction = 0;
+int servoAngleY = 90;
 
 byte thrX = THRESHOLD_X, thrZ = THRESHOLD_Z;
 
@@ -56,10 +63,12 @@ int state = START_STATE;
 
 int kf = 1;
 
-byte rxData[] = { "-10;-10;0" };
+byte rx_data[] = { "-10;-10;0" };
+
+bool got_radio = false;
 
 void init_radio() {
-	if (!init_rf(10, 7, 8, sizeof(rxData))) {
+	if (!init_rf(10, 7, 8, sizeof(rx_data))) {
 		Serial.println("Radio chip not found!");
 	}
 	else {
@@ -225,10 +234,10 @@ void serial_Info() {
 	if (show_info2) {
 		Serial.println(String("angle_y: ") + angleY);
 	}
-	if (show_info3){
+	if (show_info3) {
 		Serial.print("Received by radio:");
-		Serial.println(String((char*) rxData));
-		show_info3=false;
+		Serial.println(String((char*) rx_data));
+		show_info3 = false;
 	}
 }
 
@@ -238,6 +247,46 @@ void get_Angle_Y() {
 		servoY.write(map(angleY, 0, 1023, 0, 180));
 	}
 }
+
+void radio_Cmd() {
+	if (got_radio) {
+		String radio_cmd = String((char*) rx_data);
+		int Y_moving_val = radio_cmd.substring(0, radio_cmd.indexOf(';')).toInt();
+		Y_moving_direction = Y_moving_val >= 0 ? -1 : 1;
+		Y_moving_speed = abs(Y_moving_val);
+		if (Y_moving_speed > 1) {
+			Serial.println(
+					String("Y dir:") + Y_moving_direction + " Y speed:" + Y_moving_speed);
+			if (Y_moving_speed > 8)
+				Y_moving_speed = 5;
+			else if (Y_moving_speed > 4)
+				Y_moving_speed = 10;
+			else if (Y_moving_speed > 1)
+				Y_moving_speed = 50;
+
+			Y_moving.enabled = true;
+			Y_moving.setInterval(Y_moving_speed);
+		}
+		else {
+			Y_moving.enabled = false;
+		}
+		got_radio = false;
+	}
+}
+
+void Y_Moving() {
+	servoAngleY += Y_moving_direction;
+	servoAngleY = checkServoAngle(servoAngleY);
+	servoY.write(servoAngleY);
+}
+
+void radio_ISR() {
+	if (digitalRead(IRQ_pin) == LOW) {
+		getRxData(rx_data);
+		got_radio = true;
+	}
+}
+
 //********************************* THREADS
 
 void setup() {
@@ -278,6 +327,12 @@ void setup() {
 	serial_info.onRun(serial_Info);
 	serial_info.setInterval(100);
 
+	Y_moving.onRun(Y_Moving);
+	Y_moving.enabled = false;
+
+	radio_cmd.onRun(radio_Cmd);
+	radio_cmd.setInterval(100);
+
 	cmdParser.setOptKeyValue(true);
 
 	angle_Y.setAverageAmount(30);
@@ -286,13 +341,6 @@ void setup() {
 
 	init_radio();
 	attachPCINT(digitalPinToPCINT(8), radio_ISR, CHANGE);
-}
-
-void radio_ISR() {
-	if (digitalRead(IRQ_pin) == LOW) {
-		getRxData(rxData);
-		show_info3=true;
-	}
 }
 
 void loop() {
@@ -305,8 +353,8 @@ void loop() {
 	if (get_accel_data.shouldRun())
 		get_accel_data.run();
 
-	if (get_angle_Y.shouldRun())
-		get_angle_Y.run();
+	//if (get_angle_Y.shouldRun())
+	//	get_angle_Y.run();
 
 	if (Z_Pid.Compute()) {
 		if (state == GO) {
@@ -331,6 +379,11 @@ void loop() {
 	if (serial_info.shouldRun())
 		serial_info.run();
 
+	if (Y_moving.shouldRun())
+		Y_moving.run();
+
+	if (radio_cmd.shouldRun())
+		radio_cmd.run();
 }
 
 double checkServoAngle(double servoAngle) {
