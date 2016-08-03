@@ -10,7 +10,7 @@
 #include <EEWrap.h>
 
 #define AIM_FOR_X 0
-#define AIM_FOR_Z -20
+#define AIM_FOR_Z -5
 #define THRESHOLD_Z 3
 #define THRESHOLD_X 3
 #define START_STATE GO
@@ -48,13 +48,15 @@ Adafruit_ADXL345_Unified accel = Adafruit_ADXL345_Unified(12345);
 
 double accelZ;
 double aimAccelZ = AIM_FOR_Z;
-double servoAngleZ = 90, servoStepZ;
-PID Z_Pid(&accelZ, &servoStepZ, &aimAccelZ, .02, 0, 0.0005, REVERSE);
+int16_e servoAngleZ EEMEM;
+double  servoStepZ;
+PID Z_Pid(&accelZ, &servoStepZ, &aimAccelZ, .023, 0, 0.0005, REVERSE);
 
 double accelX;
 double aimAccelX = AIM_FOR_X;
-double servoAngleX = 90, servoStepX;
-PID X_Pid(&accelX, &servoStepX, &aimAccelX, .02, 0, 0.0005, REVERSE);
+int16_e servoAngleX EEMEM;
+double  servoStepX;
+PID X_Pid(&accelX, &servoStepX, &aimAccelX, .023, 0, 0.0005, REVERSE);
 
 byte thrX = THRESHOLD_X, thrZ = THRESHOLD_Z;
 
@@ -69,7 +71,6 @@ uint8_e Y_preset_3 EEMEM;
 
 int X_moving_speed = 0;
 int X_moving_direction = 0;
-
 
 enum STATE {
 	GO, STOP
@@ -89,7 +90,6 @@ int button_2_state = 0;
 unsigned long button_2_time;
 int button_3_state = 0;
 unsigned long button_3_time;
-
 
 //********************************* THREADS
 
@@ -313,10 +313,10 @@ void radio_Cmd() {
 			}
 			else { //released
 				if (millis() - button_1_time > LONG_PRESS_DELAY) {
-					Y_preset_1=servoAngleY;
+					Y_preset_1 = servoAngleY;
 				}
 				else {
-					aimAngleY=Y_preset_1;
+					aimAngleY = Y_preset_1;
 					Y_moving.setInterval(Y_SPEED_FAST);
 				}
 			}
@@ -331,10 +331,10 @@ void radio_Cmd() {
 			}
 			else { //released
 				if (millis() - button_2_time > LONG_PRESS_DELAY) {
-					Y_preset_2=servoAngleY;
+					Y_preset_2 = servoAngleY;
 				}
 				else {
-					aimAngleY=Y_preset_2;
+					aimAngleY = Y_preset_2;
 					Y_moving.setInterval(Y_SPEED_FAST);
 				}
 			}
@@ -349,10 +349,10 @@ void radio_Cmd() {
 			}
 			else { //released
 				if (millis() - button_3_time > LONG_PRESS_DELAY) {
-					Y_preset_3=servoAngleY;
+					Y_preset_3 = servoAngleY;
 				}
 				else {
-					aimAngleY=Y_preset_3;
+					aimAngleY = Y_preset_3;
 					Y_moving.setInterval(Y_SPEED_FAST);
 				}
 			}
@@ -391,7 +391,6 @@ void radio_ISR() {
 
 //********************************* THREADS
 
-
 void init_radio() {
 	if (!init_rf(10, 7, 8, sizeof(rx_data))) {
 		Serial.println("Radio chip not found!");
@@ -407,9 +406,23 @@ void setup() {
 	Serial.begin(9600);
 	Serial.println("Program start");
 
+	if (eeprom_writen != 1) {
+		servoAngleX=90;
+		servoAngleZ=90;
+		Y_preset_1 = 0;
+		Y_preset_2 = 90;
+		Y_preset_3 = 180;
+		servoAngleY = 90;
+		eeprom_writen = 1;
+	}
+	aimAngleY = servoAngleY;
+
 	servoX.attach(2);
+	servoX.write(servoAngleX);
 	servoZ.attach(3);
+	servoZ.write(servoAngleZ);
 	servoY.attach(4);
+	servoY.write(servoAngleY);
 
 	Z_Pid.SetMode(AUTOMATIC);
 	Z_Pid.SetOutputLimits(-90, 90);
@@ -456,14 +469,6 @@ void setup() {
 	init_radio();
 	attachPCINT(digitalPinToPCINT(8), radio_ISR, CHANGE);
 
-	if(eeprom_writen==255){
-		Y_preset_1=0;
-		Y_preset_2=90;
-		Y_preset_3=180;
-		servoAngleY=90;
-		eeprom_writen=1;
-	}
-	aimAngleY=servoAngleY;
 }
 
 
@@ -507,7 +512,6 @@ void loop() {
 	if (radio_cmd.shouldRun())
 		radio_cmd.run();
 }
-
 
 double checkServoAngle(double servoAngle) {
 	if (servoAngle > 180)
