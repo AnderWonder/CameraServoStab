@@ -13,6 +13,9 @@
 #define THRESHOLD_X 3
 #define START_STATE GO
 #define LONG_PRESS_DELAY 2000
+#define Y_SPEED_FAST 5
+#define Y_SPEED_MIDLE 10
+#define Y_SPEED_SLOW 50
 
 bool show_info1 = false;
 bool show_info2 = false;
@@ -54,6 +57,10 @@ PID X_Pid(&accelX, &servoStepX, &aimAccelX, .02, 0, 0.0005, REVERSE);
 int Y_moving_speed = 0;
 int Y_moving_direction = 0;
 int servoAngleY = 90;
+int aimAngleY = 90;
+byte Y_preset_1=0;
+byte Y_preset_2=90;
+byte Y_preset_3=180;
 
 int X_moving_speed = 0;
 int X_moving_direction = 0;
@@ -257,21 +264,21 @@ void radio_Cmd() {
 		String radio_cmd = String((char*) rx_data);
 
 		int Y_moving_val = radio_cmd.substring(0, radio_cmd.indexOf(';')).toInt();
-		Y_moving_direction = Y_moving_val >= 0 ? -1 : 1;
 		Y_moving_speed = abs(Y_moving_val);
 		if (Y_moving_speed > 1) {
-			if (Y_moving_speed > 8)
-				Y_moving_speed = 5;
-			else if (Y_moving_speed > 4)
-				Y_moving_speed = 10;
-			else if (Y_moving_speed > 1)
-				Y_moving_speed = 50;
+			aimAngleY = Y_moving_val > 0 ? 0 : 180;
 
-			Y_moving.enabled = true;
+			if (Y_moving_speed > 8)
+				Y_moving_speed = Y_SPEED_FAST;
+			else if (Y_moving_speed > 4)
+				Y_moving_speed = Y_SPEED_MIDLE;
+			else if (Y_moving_speed > 1)
+				Y_moving_speed = Y_SPEED_SLOW;
+
 			Y_moving.setInterval(Y_moving_speed);
 		}
 		else {
-			Y_moving.enabled = false;
+			aimAngleY = servoAngleY;
 		}
 
 		radio_cmd = radio_cmd.substring(radio_cmd.indexOf(';') + 1);
@@ -310,10 +317,11 @@ void radio_Cmd() {
 			}
 			else { //released
 				if (millis() - button_1_time > LONG_PRESS_DELAY) {
-					Serial.println("Button 1 - long press");
+					Y_preset_1=servoAngleY;
 				}
 				else {
-					Serial.println("Button 1 - clicked");
+					aimAngleY=Y_preset_1;
+					Y_moving.setInterval(Y_SPEED_FAST);
 				}
 			}
 		}
@@ -327,10 +335,11 @@ void radio_Cmd() {
 			}
 			else { //released
 				if (millis() - button_2_time > LONG_PRESS_DELAY) {
-					Serial.println("Button 2 - long press");
+					Y_preset_2=servoAngleY;
 				}
 				else {
-					Serial.println("Button 2 - clicked");
+					aimAngleY=Y_preset_2;
+					Y_moving.setInterval(Y_SPEED_FAST);
 				}
 			}
 		}
@@ -344,10 +353,11 @@ void radio_Cmd() {
 			}
 			else { //released
 				if (millis() - button_3_time > LONG_PRESS_DELAY) {
-					Serial.println("Button 3 - long press");
+					Y_preset_3=servoAngleY;
 				}
 				else {
-					Serial.println("Button 3 - clicked");
+					aimAngleY=Y_preset_3;
+					Y_moving.setInterval(Y_SPEED_FAST);
 				}
 			}
 		}
@@ -358,6 +368,11 @@ void radio_Cmd() {
 }
 
 void Y_Moving() {
+	char Y_moving_direction = 0;
+	if (aimAngleY > servoAngleY)
+		Y_moving_direction = 1;
+	else if (aimAngleY < servoAngleY)
+		Y_moving_direction = -1;
 	servoAngleY += Y_moving_direction;
 	servoAngleY = checkServoAngle(servoAngleY);
 	servoY.write(servoAngleY);
@@ -416,7 +431,7 @@ void setup() {
 	serial_info.setInterval(100);
 
 	Y_moving.onRun(Y_Moving);
-	Y_moving.enabled = false;
+	Y_moving.setInterval(50);
 
 	X_moving.onRun(X_Moving);
 	X_moving.setInterval(100);
