@@ -6,6 +6,8 @@
 #include <Thread.h>
 #include <ResponsiveAnalogRead.h>
 #include <PinChangeInterrupt.h>
+#include <EEPROM.h>
+#include <EEWrap.h>
 
 #define AIM_FOR_X 0
 #define AIM_FOR_Z -20
@@ -54,18 +56,20 @@ double aimAccelX = AIM_FOR_X;
 double servoAngleX = 90, servoStepX;
 PID X_Pid(&accelX, &servoStepX, &aimAccelX, .02, 0, 0.0005, REVERSE);
 
-int Y_moving_speed = 0;
-int Y_moving_direction = 0;
-int servoAngleY = 90;
-int aimAngleY = 90;
-byte Y_preset_1=0;
-byte Y_preset_2=90;
-byte Y_preset_3=180;
+byte thrX = THRESHOLD_X, thrZ = THRESHOLD_Z;
+
+int Y_moving_speed;
+int Y_moving_direction;
+int aimAngleY;
+uint8_e eeprom_writen EEMEM;
+int16_e servoAngleY EEMEM;
+uint8_e Y_preset_1 EEMEM;
+uint8_e Y_preset_2 EEMEM;
+uint8_e Y_preset_3 EEMEM;
 
 int X_moving_speed = 0;
 int X_moving_direction = 0;
 
-byte thrX = THRESHOLD_X, thrZ = THRESHOLD_Z;
 
 enum STATE {
 	GO, STOP
@@ -86,16 +90,8 @@ unsigned long button_2_time;
 int button_3_state = 0;
 unsigned long button_3_time;
 
-void init_radio() {
-	if (!init_rf(10, 7, 8, sizeof(rx_data))) {
-		Serial.println("Radio chip not found!");
-	}
-	else {
-		Serial.println("Radio connected");
-		changeMode(RX_MODE);
-		setChannel(110);
-	}
-}
+
+//********************************* THREADS
 
 //********************************* THREADS
 void get_accel_Data() {
@@ -395,6 +391,18 @@ void radio_ISR() {
 
 //********************************* THREADS
 
+
+void init_radio() {
+	if (!init_rf(10, 7, 8, sizeof(rx_data))) {
+		Serial.println("Radio chip not found!");
+	}
+	else {
+		Serial.println("Radio connected");
+		changeMode(RX_MODE);
+		setChannel(110);
+	}
+}
+
 void setup() {
 	Serial.begin(9600);
 	Serial.println("Program start");
@@ -447,7 +455,17 @@ void setup() {
 
 	init_radio();
 	attachPCINT(digitalPinToPCINT(8), radio_ISR, CHANGE);
+
+	if(eeprom_writen==255){
+		Y_preset_1=0;
+		Y_preset_2=90;
+		Y_preset_3=180;
+		servoAngleY=90;
+		eeprom_writen=1;
+	}
+	aimAngleY=servoAngleY;
 }
+
 
 void loop() {
 
@@ -489,6 +507,7 @@ void loop() {
 	if (radio_cmd.shouldRun())
 		radio_cmd.run();
 }
+
 
 double checkServoAngle(double servoAngle) {
 	if (servoAngle > 180)
