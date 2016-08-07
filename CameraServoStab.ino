@@ -8,12 +8,13 @@
 #include <PinChangeInterrupt.h>
 #include <EEPROM.h>
 #include <EEWrap.h>
+#include "CameraServoStab.h"
 
 #define AIM_FOR_X 0
-#define AIM_FOR_Z -5
-#define THRESHOLD_Z 3
-#define THRESHOLD_X 3
-#define START_STATE GO
+#define AIM_FOR_Z -15
+#define THRESHOLD_Z 0
+#define THRESHOLD_X 1
+#define START_STATE GO_XZ
 #define LONG_PRESS_DELAY 2000
 #define Y_SPEED_FAST 5
 #define Y_SPEED_MIDLE 10
@@ -37,6 +38,8 @@ Thread Y_moving = Thread();
 
 Thread X_moving = Thread();
 
+Thread pid_frontend_processing = Thread();
+
 ResponsiveAnalogRead accel_X(false, .01);
 ResponsiveAnalogRead accel_Z(false, .01);
 
@@ -47,22 +50,29 @@ Servo servoZ, servoY, servoX;
 Adafruit_ADXL345_Unified accel = Adafruit_ADXL345_Unified(12345);
 
 double accelZ;
-double aimAccelZ = AIM_FOR_Z;
+int16_e aimZ EEMEM;
+double aimAccelZ;
 int16_e servoAngleZ EEMEM;
-double  servoStepZ;
+double servoStepZ;
 PID Z_Pid(&accelZ, &servoStepZ, &aimAccelZ, .023, 0, 0.0005, REVERSE);
+
+
+
+Axis axis_x;
 
 double accelX;
 double aimAccelX = AIM_FOR_X;
-int16_e servoAngleX EEMEM;
-double  servoStepX;
-PID X_Pid(&accelX, &servoStepX, &aimAccelX, .023, 0, 0.0005, REVERSE);
+float_e servoAngleX EEMEM;
+float servoAngleX_f;
+double servoStepX;
+PID X_Pid(&accelX, &servoStepX, &aimAccelX, .015, 0.0008, 0.002, REVERSE);
 
 byte thrX = THRESHOLD_X, thrZ = THRESHOLD_Z;
 
 int Y_moving_speed;
 int Y_moving_direction;
 int aimAngleY;
+bool Y_moving_start = true;
 uint8_e eeprom_writen EEMEM;
 int16_e servoAngleY EEMEM;
 uint8_e Y_preset_1 EEMEM;
@@ -71,19 +81,22 @@ uint8_e Y_preset_3 EEMEM;
 
 int X_moving_speed = 0;
 int X_moving_direction = 0;
+bool X_moving_start = true;
 
 enum STATE {
-	GO, STOP
+	GO_XZ, GO_Z, GO_X, STOP
 };
 int state = START_STATE;
+int prev_state = START_STATE;
 
-int kf = 1;
+int kf = 100;
 
 byte rx_data[] = { "-10;-10;0;0;0;0;" };
 
 bool got_radio = false;
 
 int button_0_state = 0;
+unsigned long button_0_time;
 int button_1_state = 0;
 unsigned long button_1_time;
 int button_2_state = 0;
@@ -91,14 +104,21 @@ unsigned long button_2_time;
 int button_3_state = 0;
 unsigned long button_3_time;
 
-//********************************* THREADS
+//**************** PID FRONTEND PROCESSING
+//Define Variables we'll be connecting to
+double *Setpoint, *Input, *Output;
+
+//Specify the links and initial tuning parameters
+PID *myPID;
+//**************** PID FRONTEND PROCESSING
 
 //********************************* THREADS
 void get_accel_Data() {
 	accel_X.update(accel.getX());
 	accel_Z.update(accel.getZ());
 	accelZ = accel_Z.getValue();
-	accelX = accel_X.getValue();
+	axis_x.accel = accel_Z.getValue();
+	//accelX = accel_X.getValue();
 }
 
 void serial_Cmd() {
@@ -112,7 +132,7 @@ void serial_Cmd() {
 		if (cmdParser.parseCmd(&cmdBuffer) != CMDPARSER_ERROR) {
 
 			if (cmdParser.equalCommand("go"))
-				state = GO;
+				state = GO_XZ;
 
 			if (cmdParser.equalCommand("st"))
 				state = STOP;
@@ -257,12 +277,14 @@ void serial_Info() {
 
 void radio_Cmd() {
 	if (got_radio) {
+
 		String radio_cmd = String((char*) rx_data);
 
 		int Y_moving_val = radio_cmd.substring(0, radio_cmd.indexOf(';')).toInt();
 		Y_moving_speed = abs(Y_moving_val);
 		if (Y_moving_speed > 1) {
-			aimAngleY = Y_moving_val > 0 ? 0 : 180;
+
+			aimAngleY = Y_moving_val > 0 ? 180 : 0;
 
 			if (Y_moving_speed > 8)
 				Y_moving_speed = Y_SPEED_FAST;
@@ -275,18 +297,19 @@ void radio_Cmd() {
 		}
 		else {
 			aimAngleY = servoAngleY;
+
 		}
 
 		radio_cmd = radio_cmd.substring(radio_cmd.indexOf(';') + 1);
 		int X_moving_val = radio_cmd.substring(0, radio_cmd.indexOf(';')).toInt();
-		X_moving_direction = X_moving_val >= 0 ? -5 : 5;
+		X_moving_direction = X_moving_val >= 0 ? 1 : -1;
 		X_moving_speed = abs(X_moving_val);
-		if (X_moving_speed > 2) {
+		if (X_moving_speed > 7) {
 			if (X_moving_speed > 7) {
-				X_moving.setInterval(20);
+				X_moving.setInterval(5);
 			}
 			else
-				X_moving.setInterval(50);
+				X_moving.setInterval(25);
 			X_moving.enabled = true;
 		}
 		else {
@@ -295,18 +318,45 @@ void radio_Cmd() {
 
 		radio_cmd = radio_cmd.substring(radio_cmd.indexOf(';') + 1);
 		int button_0_now = radio_cmd.substring(0, radio_cmd.indexOf(';')).toInt();
-		if (button_0_state && !button_0_now) { //clicked
-			if (state == GO)
-				state = STOP;
-			else {
-				aimAccelX = accelX;
-				state = GO;
+
+		radio_cmd = radio_cmd.substring(radio_cmd.indexOf(';') + 1);
+		int button_1_now = radio_cmd.substring(0, radio_cmd.indexOf(';')).toInt();
+
+		radio_cmd = radio_cmd.substring(radio_cmd.indexOf(';') + 1);
+		int button_2_now = radio_cmd.substring(0, radio_cmd.indexOf(';')).toInt();
+
+		radio_cmd = radio_cmd.substring(radio_cmd.indexOf(';') + 1);
+		int button_3_now = radio_cmd.substring(0, radio_cmd.indexOf(';')).toInt();
+
+		if (button_0_now != button_0_state) {
+			if (button_0_now) { //pressed
+				button_0_time = millis();
+			}
+			else { //released
+				if (millis() - button_0_time > LONG_PRESS_DELAY) {
+
+				}
+				else {
+					switch (state) {
+					case GO_XZ:
+						state = GO_Z;
+						break;
+					case GO_Z:
+						state = STOP;
+						break;
+					case STOP:
+						aimAccelX = accelX;
+						if (button_1_now) {
+							aimAccelZ = aimZ = accelZ;
+							button_1_now = button_1_state = 0;
+						}
+						state = GO_XZ;
+					}
+				}
 			}
 		}
 		button_0_state = button_0_now;
 
-		radio_cmd = radio_cmd.substring(radio_cmd.indexOf(';') + 1);
-		int button_1_now = radio_cmd.substring(0, radio_cmd.indexOf(';')).toInt();
 		if (button_1_now != button_1_state) {
 			if (button_1_now) { //pressed
 				button_1_time = millis();
@@ -323,8 +373,6 @@ void radio_Cmd() {
 		}
 		button_1_state = button_1_now;
 
-		radio_cmd = radio_cmd.substring(radio_cmd.indexOf(';') + 1);
-		int button_2_now = radio_cmd.substring(0, radio_cmd.indexOf(';')).toInt();
 		if (button_2_now != button_2_state) {
 			if (button_2_now) { //pressed
 				button_2_time = millis();
@@ -341,8 +389,6 @@ void radio_Cmd() {
 		}
 		button_2_state = button_2_now;
 
-		radio_cmd = radio_cmd.substring(radio_cmd.indexOf(';') + 1);
-		int button_3_now = radio_cmd.substring(0, radio_cmd.indexOf(';')).toInt();
 		if (button_3_now != button_3_state) {
 			if (button_3_now) { //pressed
 				button_3_time = millis();
@@ -360,26 +406,50 @@ void radio_Cmd() {
 		button_3_state = button_3_now;
 
 		got_radio = false;
+
 	}
 }
 
 void Y_Moving() {
 	char Y_moving_direction = 0;
-	if (aimAngleY > servoAngleY)
-		Y_moving_direction = 1;
-	else if (aimAngleY < servoAngleY)
-		Y_moving_direction = -1;
-	servoAngleY += Y_moving_direction;
-	servoAngleY = checkServoAngle(servoAngleY);
-	servoY.write(servoAngleY);
+	if (servoAngleY != aimAngleY) {
+		if (Y_moving_start) {
+			prev_state = state;
+			state = STOP;
+			Y_moving_start = false;
+		}
+
+		if (aimAngleY > servoAngleY)
+			Y_moving_direction = 1;
+		else if (aimAngleY < servoAngleY)
+			Y_moving_direction = -1;
+		servoAngleY += Y_moving_direction;
+		servoAngleY = checkServoAngle(servoAngleY);
+		servoY.write(servoAngleY);
+	}
+	else {
+		if (!Y_moving_start) {
+			state = prev_state;
+			Y_moving_start = true;
+		}
+	}
 }
 
 void X_Moving() {
-	aimAccelX += X_moving_direction;
-	if (aimAccelX > 250)
-		aimAccelX = 250;
-	if (aimAccelX < -250)
-		aimAccelX = -250;
+	if (state == GO_XZ || state == GO_X) {
+		//aimAccelX += X_moving_direction;
+		axis_x.aimAccel += X_moving_direction;
+		if (axis_x.aimAccel > 250)
+			axis_x.aimAccel = 250;
+		if (axis_x.aimAccel < -250)
+			axis_x.aimAccel = -250;
+	}
+	else {
+		axis_x.servoAngle -= X_moving_direction;
+		axis_x.servoAngle = checkServoAngle(axis_x.servoAngle);
+		servoX.write(axis_x.servoAngle);
+		axis_x.aimAccel = axis_x.accel;
+	}
 }
 
 void radio_ISR() {
@@ -389,10 +459,14 @@ void radio_ISR() {
 	}
 }
 
+void pid_frontend_Processing() {
+	SerialReceive();
+	SerialSend();
+}
 //********************************* THREADS
 
 void init_radio() {
-	if (!init_rf(10, 7, 8, sizeof(rx_data))) {
+	if (!init_rf(10, 9, 8, sizeof(rx_data))) {
 		Serial.println("Radio chip not found!");
 	}
 	else {
@@ -402,35 +476,79 @@ void init_radio() {
 	}
 }
 
+void initThreads() {
+
+	serial_info.onRun(serial_Info);
+	serial_info.setInterval(100);
+
+	serial_cmd.onRun(serial_Cmd);
+	serial_cmd.setInterval(200);
+
+	radio_cmd.onRun(radio_Cmd);
+	radio_cmd.setInterval(100);
+
+	get_accel_data.onRun(get_accel_Data);
+	get_accel_data.setInterval(1);
+
+	Y_moving.onRun(Y_Moving);
+	Y_moving.setInterval(50);
+
+	X_moving.onRun(X_Moving);
+	X_moving.setInterval(100);
+	X_moving.enabled = false;
+
+	pid_frontend_processing.onRun(pid_frontend_Processing);
+	pid_frontend_processing.setInterval(50);
+}
+
+void connect_PID_frontend(Axis *axis) {
+	myPID = axis->pid;
+	Setpoint = &axis->aimAccel;
+	Input = &axis->accel;
+	Output = &axis->servoStep;
+}
+
 void setup() {
+
 	Serial.begin(9600);
 	Serial.println("Program start");
 
 	if (eeprom_writen != 1) {
-		servoAngleX=90;
-		servoAngleZ=90;
+		axis_x.servoAngle = 90;
+		//servoAngleX = 90;
+		servoAngleZ = 90;
 		Y_preset_1 = 0;
 		Y_preset_2 = 90;
 		Y_preset_3 = 180;
 		servoAngleY = 90;
+		aimAccelZ = aimZ = AIM_FOR_Z;
 		eeprom_writen = 1;
+		Serial.println("Init eeprom");
 	}
 	aimAngleY = servoAngleY;
+	aimAccelZ = aimZ;
 
-	servoX.attach(2);
-	servoX.write(servoAngleX);
-	servoZ.attach(3);
+	//servoX.attach(5);
+	//servoX.write(axis_x.servoAngle);
+	axis_x.servo.attach(5);
+	axis_x.servo.write(axis_x.servoAngle);
+
+	servoZ.attach(6);
 	servoZ.write(servoAngleZ);
-	servoY.attach(4);
+
+	servoY.attach(7);
 	servoY.write(servoAngleY);
 
 	Z_Pid.SetMode(AUTOMATIC);
 	Z_Pid.SetOutputLimits(-90, 90);
 	Z_Pid.SetSampleTime(20);
 
-	X_Pid.SetMode(AUTOMATIC);
-	X_Pid.SetOutputLimits(-90, 90);
-	X_Pid.SetSampleTime(20);
+	//X_Pid.SetMode(AUTOMATIC);
+	//X_Pid.SetOutputLimits(-90, 90);
+	//X_Pid.SetSampleTime(20);
+
+	accel_X.setAverageAmount(10);
+	accel_Z.setAverageAmount(10);
 
 	delay(500);
 
@@ -442,35 +560,15 @@ void setup() {
 	accel.setRange(ADXL345_RANGE_2_G);
 	accel.setDataRate(ADXL345_DATARATE_3200_HZ);
 
-	serial_cmd.onRun(serial_Cmd);
-	serial_cmd.setInterval(200);
-
-	get_accel_data.onRun(get_accel_Data);
-	get_accel_data.setInterval(1);
-
-	serial_info.onRun(serial_Info);
-	serial_info.setInterval(100);
-
-	Y_moving.onRun(Y_Moving);
-	Y_moving.setInterval(50);
-
-	X_moving.onRun(X_Moving);
-	X_moving.setInterval(100);
-	X_moving.enabled = false;
-
-	radio_cmd.onRun(radio_Cmd);
-	radio_cmd.setInterval(100);
+	initThreads();
 
 	cmdParser.setOptKeyValue(true);
 
-	accel_X.setAverageAmount(10);
-	accel_Z.setAverageAmount(10);
-
 	init_radio();
-	attachPCINT(digitalPinToPCINT(8), radio_ISR, CHANGE);
+	attachPCINT(digitalPinToPCINT(IRQ_pin), radio_ISR, CHANGE);
 
+	connect_PID_frontend(&axis_x);
 }
-
 
 void loop() {
 
@@ -481,7 +579,7 @@ void loop() {
 		get_accel_data.run();
 
 	if (Z_Pid.Compute()) {
-		if (state == GO) {
+		if (state == GO_XZ || state == GO_Z) {
 			if (abs(accelZ-aimAccelZ) > thrZ) {
 				servoAngleZ += servoStepZ;
 				servoAngleZ = checkServoAngle(servoAngleZ);
@@ -490,15 +588,19 @@ void loop() {
 		}
 	}
 
-	if (X_Pid.Compute()) {
-		if (state == GO) {
-			if (abs(accelX-aimAccelX) > thrX) {
-				servoAngleX += servoStepX;
-				servoAngleX = checkServoAngle(servoAngleX);
-				servoX.write(servoAngleX);
-			}
-		}
-	}
+	axis_x.process_PID(state == GO_XZ || state == GO_X);
+
+	/*
+	 if (axis_x.pid.Compute()) {
+	 if (state == GO_XZ || state == GO_X) {
+	 if (abs(axis_x.accel-axis_x.aimAccel) > axis_x.threshold) {
+	 axis_x.servoAngle += (float) axis_x.servoStep;
+	 axis_x.servoAngle = checkServoAngle(axis_x.servoAngle);
+	 axis_x.servo.write(round(axis_x.servoAngle));
+	 }
+	 }
+	 }
+	 */
 
 	if (serial_info.shouldRun())
 		serial_info.run();
@@ -511,9 +613,12 @@ void loop() {
 
 	if (radio_cmd.shouldRun())
 		radio_cmd.run();
+
+	if (pid_frontend_processing.shouldRun())
+		pid_frontend_processing.run();
 }
 
-double checkServoAngle(double servoAngle) {
+float checkServoAngle(float servoAngle) {
 	if (servoAngle > 180)
 		servoAngle = 180;
 	if (servoAngle < 0)
@@ -521,3 +626,95 @@ double checkServoAngle(double servoAngle) {
 	return servoAngle;
 }
 
+//**************** PID FRONTEND PROCESSING
+/********************************************
+ * Serial Communication functions / helpers
+ ********************************************/
+
+union {                // This Data structure lets
+	byte asBytes[24];    // us take the byte array
+	float asFloat[6];    // sent from processing and
+}                      // easily convert it to a
+foo;                   // float array
+
+// getting float values from processing into the arduino
+// was no small task.  the way this program does it is
+// as follows:
+//  * a float takes up 4 bytes.  in processing, convert
+//    the array of floats we want to send, into an array
+//    of bytes.
+//  * send the bytes to the arduino
+//  * use a data structure known as a union to convert
+//    the array of bytes back into an array of floats
+
+//  the bytes coming from the arduino follow the following
+//  format:
+//  0: 0=Manual, 1=Auto, else = ? error ?
+//  1-4: float setpoint
+//  5-8: float input
+//  9-12: float output
+//  13-16: float P_Param
+//  17-20: float I_Param
+//  21-24: float D_Param
+void SerialReceive() {
+
+	// read the bytes sent from Processing
+	int index = 0;
+	byte Auto_Man = -1;
+	while (Serial.available() && index < 25) {
+		if (index == 0)
+			Auto_Man = Serial.read();
+		else
+			foo.asBytes[index - 1] = Serial.read();
+		index++;
+	}
+
+	// if the information we got was in the correct format,
+	// read it into the system
+	if (index == 25 && (Auto_Man == 0 || Auto_Man == 1)) {
+		*Setpoint = double(foo.asFloat[0]);
+		//Input=double(foo.asFloat[1]);       // * the user has the ability to send the
+		//   value of "Input"  in most cases (as
+		//   in this one) this is not needed.
+		if (Auto_Man == 0)                  // * only change the output if we are in
+				{                              //   manual mode.  otherwise we'll get an
+			*Output = double(foo.asFloat[2]); //   output blip, then the controller will
+		}                                     //   overwrite.
+
+		double p, i, d;                  // * read in and set the controller tunings
+		p = double(foo.asFloat[3]);           //
+		i = double(foo.asFloat[4]);           //
+		d = double(foo.asFloat[5]);           //
+		myPID->SetTunings(p / kf, i / kf, d / kf);            //
+
+		if (Auto_Man == 0)
+			myPID->SetMode(MANUAL);            // * set the controller mode
+		else
+			myPID->SetMode(AUTOMATIC);             //
+	}
+	Serial.flush();              // * clear any random data from the serial buffer
+}
+
+// unlike our tiny microprocessor, the processing ap
+// has no problem converting strings into floats, so
+// we can just send strings.  much easier than getting
+// floats from processing to here no?
+void SerialSend() {
+	Serial.print("PID ");
+	Serial.print(*Setpoint);
+	Serial.print(" ");
+	Serial.print(*Input);
+	Serial.print(" ");
+	Serial.print(*Output);
+	Serial.print(" ");
+	Serial.print(myPID->GetKp() * kf);
+	Serial.print(" ");
+	Serial.print(myPID->GetKi() * kf);
+	Serial.print(" ");
+	Serial.print(myPID->GetKd() * kf);
+	Serial.print(" ");
+	if (myPID->GetMode() == AUTOMATIC)
+		Serial.println("Automatic");
+	else
+		Serial.println("Manual");
+}
