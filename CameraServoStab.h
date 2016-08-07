@@ -4,7 +4,8 @@
 #include <PID_v1.h>
 #include <EEPROM.h>
 #include <EEWrap.h>
-#define THRESHOLD_X 1
+#include <ResponsiveAnalogRead.h>
+
 class Axis {
 public:
 	double accel;
@@ -18,6 +19,7 @@ public:
 	PID *pid;
 	byte threshold;
 	Servo servo;
+	ResponsiveAnalogRead *input_accel;
 	Axis() {
 		if (first_init != 1) {
 			first_init = 1;
@@ -30,11 +32,17 @@ public:
 		pid->SetMode(AUTOMATIC);
 		pid->SetOutputLimits(-90, 90);
 		pid->SetSampleTime(20);
-		threshold = THRESHOLD_X;
+		input_accel = new ResponsiveAnalogRead(false, .01);
+		input_accel->setAverageAmount(10);
 	}
 
 	void update_pid_tun() {
 		pid->SetTunings(pid_kp, pid_ki, pid_kd);
+	}
+
+	void update_data(int data) {
+		input_accel->update(data);
+		accel = input_accel->getValue();
 	}
 
 	void process_PID(bool servo_enable) {

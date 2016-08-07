@@ -23,6 +23,7 @@
 bool show_info1 = false;
 bool show_info2 = false;
 bool show_info3 = false;
+bool pid_frontend = false;
 
 Thread serial_cmd = Thread();
 
@@ -40,7 +41,6 @@ Thread X_moving = Thread();
 
 Thread pid_frontend_processing = Thread();
 
-ResponsiveAnalogRead accel_X(false, .01);
 ResponsiveAnalogRead accel_Z(false, .01);
 
 CmdParser cmdParser;
@@ -56,16 +56,7 @@ int16_e servoAngleZ EEMEM;
 double servoStepZ;
 PID Z_Pid(&accelZ, &servoStepZ, &aimAccelZ, .023, 0, 0.0005, REVERSE);
 
-
-
-Axis axis_x;
-
-double accelX;
-double aimAccelX = AIM_FOR_X;
-float_e servoAngleX EEMEM;
-float servoAngleX_f;
-double servoStepX;
-PID X_Pid(&accelX, &servoStepX, &aimAccelX, .015, 0.0008, 0.002, REVERSE);
+Axis axis_x EEMEM;
 
 byte thrX = THRESHOLD_X, thrZ = THRESHOLD_Z;
 
@@ -104,50 +95,46 @@ unsigned long button_2_time;
 int button_3_state = 0;
 unsigned long button_3_time;
 
-//**************** PID FRONTEND PROCESSING
-//Define Variables we'll be connecting to
 double *Setpoint, *Input, *Output;
-
-//Specify the links and initial tuning parameters
-PID *myPID;
-//**************** PID FRONTEND PROCESSING
+Axis *frontend_axis;
 
 //********************************* THREADS
 void get_accel_Data() {
-	accel_X.update(accel.getX());
+	axis_x.update_data(accel.getX());
 	accel_Z.update(accel.getZ());
 	accelZ = accel_Z.getValue();
-	axis_x.accel = accel_Z.getValue();
-	//accelX = accel_X.getValue();
 }
 
 void serial_Cmd() {
 
-	CmdBuffer<32> cmdBuffer;
+	if (Serial.available()) {
 
-	cmdBuffer.setEndChar(CMDBUFFER_CHAR_CR);
+		String buffer_string = Serial.readString();
 
-	if (cmdBuffer.readFromSerial(&Serial, 1)) {
+		pid_frontend_serial_receive(&buffer_string);
 
-		if (cmdParser.parseCmd(&cmdBuffer) != CMDPARSER_ERROR) {
+		if (cmdParser.parseCmd((char*) buffer_string.c_str()) != CMDPARSER_ERROR) {
 
-			if (cmdParser.equalCommand("go"))
+			if (cmdParser.equalCommand_P(PSTR("go")))
 				state = GO_XZ;
 
-			if (cmdParser.equalCommand("st"))
+			if (cmdParser.equalCommand_P(PSTR("st")))
 				state = STOP;
 
-			if (cmdParser.equalCommand("pid")) {
+			if (cmdParser.equalCommand_P(PSTR("pid"))) {
 				PID *pid;
 				pid = NULL;
-				if (cmdParser.equalCmdParam(1, "X"))
-					pid = &X_Pid;
-				if (cmdParser.equalCmdParam(1, "Z"))
+				if (cmdParser.equalCmdParam_P(1, PSTR("X")))
+					pid = axis_x.pid;
+				if (cmdParser.equalCmdParam_P(1, PSTR("Z")))
 					pid = &Z_Pid;
-				if (cmdParser.equalCmdParam(1, "kf")) {
+				if (cmdParser.equalCmdParam_P(1, PSTR("kf"))) {
 					kf =
 							String(cmdParser.getValueFromKey(cmdParser.getCmdParam(1))).toInt();
 					Serial.println(String("kf=") + kf);
+				}
+				if (cmdParser.equalCmdParam_P(1, PSTR("fr"))) {
+					pid_frontend = !pid_frontend;
 				}
 				if (pid != NULL) {
 					String k(cmdParser.getCmdParam(2));
@@ -165,98 +152,19 @@ void serial_Cmd() {
 				}
 			}
 
-			if (cmdParser.equalCommand("info1")) {
+			if (cmdParser.equalCommand_P(PSTR("info1"))) {
 				show_info1 = !show_info1;
 			}
 
-			if (cmdParser.equalCommand("info2")) {
+			if (cmdParser.equalCommand_P(PSTR("info2"))) {
 				show_info2 = !show_info2;
 			}
 
-			if (cmdParser.equalCommand("info3")) {
+			if (cmdParser.equalCommand_P(PSTR("info3"))) {
 				show_info3 = !show_info3;
 			}
 
-			if (cmdParser.equalCommand("aim")) {
-				int aim_val = String(
-						cmdParser.getValueFromKey(cmdParser.getCmdParam(1))).toInt();
-				if (cmdParser.equalCmdParam(1, "X")) {
-					aimAccelX = aim_val;
-				}
-				if (cmdParser.equalCmdParam(1, "Z")) {
-					aimAccelZ = aim_val;
-				}
-			}
-
-			/*
-			 if (command == "go") {
-			 state = GO;
-			 }
-			 if (command == "st") {
-			 state = STOP;
-			 }
-			 int k = 10;
-			 if (command == "kpz") {
-			 kp = Serial.parseFloat() / k;
-			 Z_Pid.SetTunings(kp, Z_Pid.GetKi(), Z_Pid.GetKd());
-			 command = "infz";
-			 }
-			 if (command == "kiz") {
-			 ki = Serial.parseFloat() / k;
-			 Z_Pid.SetTunings(Z_Pid.GetKp(), ki, Z_Pid.GetKd());
-			 command = "infz";
-			 }
-			 if (command == "kdz") {
-			 kd = Serial.parseFloat() / k;
-			 Z_Pid.SetTunings(Z_Pid.GetKp(), Z_Pid.GetKi(), kd);
-			 command = "infz";
-			 }
-			 if (command == "thz") {
-			 thrZ = Serial.parseInt();
-			 }
-			 if (command == "infz") {
-			 Serial.print("Kp=");
-			 Serial.print(Z_Pid.GetKp() * k);
-			 Serial.print(";");
-			 Serial.print("Ki=");
-			 Serial.print(Z_Pid.GetKi() * k);
-			 Serial.print(";");
-			 Serial.print("Kd=");
-			 Serial.println(Z_Pid.GetKd() * k);
-			 }
-			 if (command == "kpx") {
-			 kp = Serial.parseFloat() / k;
-			 X_Pid.SetTunings(kp, X_Pid.GetKi(), X_Pid.GetKd());
-			 command = "infx";
-			 }
-			 if (command == "kix") {
-			 ki = Serial.parseFloat() / k;
-			 X_Pid.SetTunings(X_Pid.GetKp(), ki, X_Pid.GetKd());
-			 command = "infx";
-			 }
-			 if (command == "kdx") {
-			 kd = Serial.parseFloat() / k;
-			 X_Pid.SetTunings(X_Pid.GetKp(), X_Pid.GetKi(), kd);
-			 command = "infx";
-			 }
-			 if (command == "thx") {
-			 thrX = Serial.parseInt();
-			 }
-			 if (command == "infx") {
-			 Serial.print("Kp=");
-			 Serial.print(X_Pid.GetKp() * k);
-			 Serial.print(";");
-			 Serial.print("Ki=");
-			 Serial.print(X_Pid.GetKi() * k);
-			 Serial.print(";");
-			 Serial.print("Kd=");
-			 Serial.println(X_Pid.GetKd() * k);
-			 }
-			 */
-
 		}
-		else
-			Serial.println("Error parsing cmd!");
 
 	}
 
@@ -264,7 +172,7 @@ void serial_Cmd() {
 
 void serial_Info() {
 	if (show_info1) {
-		Serial.println(String("accel_x: ") + accelX + "; accel_z: " + accelZ);
+		Serial.println(String("accel_x: ") + axis_x.accel + "; accel_z: " + accelZ);
 	}
 	if (show_info2) {
 	}
@@ -345,7 +253,7 @@ void radio_Cmd() {
 						state = STOP;
 						break;
 					case STOP:
-						aimAccelX = accelX;
+						axis_x.aimAccel = axis_x.accel;
 						if (button_1_now) {
 							aimAccelZ = aimZ = accelZ;
 							button_1_now = button_1_state = 0;
@@ -460,8 +368,8 @@ void radio_ISR() {
 }
 
 void pid_frontend_Processing() {
-	SerialReceive();
-	SerialSend();
+	if (pid_frontend)
+		pid_frontend_serial_send();
 }
 //********************************* THREADS
 
@@ -502,7 +410,7 @@ void initThreads() {
 }
 
 void connect_PID_frontend(Axis *axis) {
-	myPID = axis->pid;
+	frontend_axis = axis;
 	Setpoint = &axis->aimAccel;
 	Input = &axis->accel;
 	Output = &axis->servoStep;
@@ -515,7 +423,6 @@ void setup() {
 
 	if (eeprom_writen != 1) {
 		axis_x.servoAngle = 90;
-		//servoAngleX = 90;
 		servoAngleZ = 90;
 		Y_preset_1 = 0;
 		Y_preset_2 = 90;
@@ -528,10 +435,9 @@ void setup() {
 	aimAngleY = servoAngleY;
 	aimAccelZ = aimZ;
 
-	//servoX.attach(5);
-	//servoX.write(axis_x.servoAngle);
 	axis_x.servo.attach(5);
 	axis_x.servo.write(axis_x.servoAngle);
+	axis_x.threshold = THRESHOLD_X;
 
 	servoZ.attach(6);
 	servoZ.write(servoAngleZ);
@@ -543,11 +449,6 @@ void setup() {
 	Z_Pid.SetOutputLimits(-90, 90);
 	Z_Pid.SetSampleTime(20);
 
-	//X_Pid.SetMode(AUTOMATIC);
-	//X_Pid.SetOutputLimits(-90, 90);
-	//X_Pid.SetSampleTime(20);
-
-	accel_X.setAverageAmount(10);
 	accel_Z.setAverageAmount(10);
 
 	delay(500);
@@ -590,18 +491,6 @@ void loop() {
 
 	axis_x.process_PID(state == GO_XZ || state == GO_X);
 
-	/*
-	 if (axis_x.pid.Compute()) {
-	 if (state == GO_XZ || state == GO_X) {
-	 if (abs(axis_x.accel-axis_x.aimAccel) > axis_x.threshold) {
-	 axis_x.servoAngle += (float) axis_x.servoStep;
-	 axis_x.servoAngle = checkServoAngle(axis_x.servoAngle);
-	 axis_x.servo.write(round(axis_x.servoAngle));
-	 }
-	 }
-	 }
-	 */
-
 	if (serial_info.shouldRun())
 		serial_info.run();
 
@@ -626,7 +515,7 @@ float checkServoAngle(float servoAngle) {
 	return servoAngle;
 }
 
-//**************** PID FRONTEND PROCESSING
+//*********************************************************PID FRONTEND
 /********************************************
  * Serial Communication functions / helpers
  ********************************************/
@@ -656,50 +545,44 @@ foo;                   // float array
 //  13-16: float P_Param
 //  17-20: float I_Param
 //  21-24: float D_Param
-void SerialReceive() {
+void pid_frontend_serial_receive(String *buffer) {
+	if (buffer->length() == 25) {
+		//buffer->getBytes((unsigned char*)(foo.asBytes),24,1);
+		for(byte i=1;i<25;i++)
+				foo.asBytes[i - 1] = byte((*buffer)[i]);
+		// if the information we got was in the correct format,
+		// read it into the system
+		byte Auto_Man=(*buffer)[0];
+		if (Auto_Man == 0 || Auto_Man == 1) {
+			Serial.println("in");
+			*Setpoint = double(foo.asFloat[0]);
+			//Input=double(foo.asFloat[1]);       // * the user has the ability to send the
+			//   value of "Input"  in most cases (as
+			//   in this one) this is not needed.
+			if (Auto_Man == 0)                // * only change the output if we are in
+					{                            //   manual mode.  otherwise we'll get an
+				*Output = double(foo.asFloat[2]); //   output blip, then the controller will
+			}                                     //   overwrite.
 
-	// read the bytes sent from Processing
-	int index = 0;
-	byte Auto_Man = -1;
-	while (Serial.available() && index < 25) {
-		if (index == 0)
-			Auto_Man = Serial.read();
-		else
-			foo.asBytes[index - 1] = Serial.read();
-		index++;
+			frontend_axis->pid_kp = double(foo.asFloat[3]) / kf;           //
+			frontend_axis->pid_ki = double(foo.asFloat[4]) / kf;           //
+			frontend_axis->pid_kd = double(foo.asFloat[5]) / kf;           //
+
+			Serial.println(double(foo.asFloat[3]));
+
+			frontend_axis->update_pid_tun();
+
+			if (Auto_Man == 0)
+				frontend_axis->pid->SetMode(MANUAL);        // * set the controller mode
+			else
+				frontend_axis->pid->SetMode(AUTOMATIC);             //
+		}
+
 	}
 
-	// if the information we got was in the correct format,
-	// read it into the system
-	if (index == 25 && (Auto_Man == 0 || Auto_Man == 1)) {
-		*Setpoint = double(foo.asFloat[0]);
-		//Input=double(foo.asFloat[1]);       // * the user has the ability to send the
-		//   value of "Input"  in most cases (as
-		//   in this one) this is not needed.
-		if (Auto_Man == 0)                  // * only change the output if we are in
-				{                              //   manual mode.  otherwise we'll get an
-			*Output = double(foo.asFloat[2]); //   output blip, then the controller will
-		}                                     //   overwrite.
-
-		double p, i, d;                  // * read in and set the controller tunings
-		p = double(foo.asFloat[3]);           //
-		i = double(foo.asFloat[4]);           //
-		d = double(foo.asFloat[5]);           //
-		myPID->SetTunings(p / kf, i / kf, d / kf);            //
-
-		if (Auto_Man == 0)
-			myPID->SetMode(MANUAL);            // * set the controller mode
-		else
-			myPID->SetMode(AUTOMATIC);             //
-	}
-	Serial.flush();              // * clear any random data from the serial buffer
 }
 
-// unlike our tiny microprocessor, the processing ap
-// has no problem converting strings into floats, so
-// we can just send strings.  much easier than getting
-// floats from processing to here no?
-void SerialSend() {
+void pid_frontend_serial_send() {
 	Serial.print("PID ");
 	Serial.print(*Setpoint);
 	Serial.print(" ");
@@ -707,13 +590,13 @@ void SerialSend() {
 	Serial.print(" ");
 	Serial.print(*Output);
 	Serial.print(" ");
-	Serial.print(myPID->GetKp() * kf);
+	Serial.print(frontend_axis->pid->GetKp() * kf);
 	Serial.print(" ");
-	Serial.print(myPID->GetKi() * kf);
+	Serial.print(frontend_axis->pid->GetKi() * kf);
 	Serial.print(" ");
-	Serial.print(myPID->GetKd() * kf);
+	Serial.print(frontend_axis->pid->GetKd() * kf);
 	Serial.print(" ");
-	if (myPID->GetMode() == AUTOMATIC)
+	if (frontend_axis->pid->GetMode() == AUTOMATIC)
 		Serial.println("Automatic");
 	else
 		Serial.println("Manual");
