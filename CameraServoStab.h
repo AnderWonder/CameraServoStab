@@ -32,8 +32,8 @@ public:
 	Axis_eemem *eemem_data;
 	Axis(Axis_eemem *eemem_data,byte threshold) {
 		this->eemem_data=eemem_data;
-		if (eemem_data->first_init != 4) {
-			eemem_data->first_init = 4;
+		if (eemem_data->first_init != 5) {
+			eemem_data->first_init = 5;
 			eemem_data->servoAngle = 90;
 			eemem_data->pid_kp = .015;
 			eemem_data->pid_ki = 0;

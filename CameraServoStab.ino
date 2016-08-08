@@ -59,6 +59,9 @@ PID Z_Pid(&accelZ, &servoStepZ, &aimAccelZ, .01, 0, 0.0005, REVERSE);
 Axis_eemem axis_x_eemem EEMEM;
 Axis axis_x(&axis_x_eemem,THRESHOLD_X);
 
+Axis_eemem axis_z_eemem EEMEM;
+Axis axis_z(&axis_z_eemem,THRESHOLD_Z);
+
 byte thrX = THRESHOLD_X, thrZ = THRESHOLD_Z;
 
 int Y_moving_speed;
@@ -102,8 +105,9 @@ Axis *frontend_axis;
 //********************************* THREADS
 void get_accel_Data() {
 	axis_x.update_data(accel.getX());
-	accel_Z.update(accel.getZ());
-	accelZ = accel_Z.getValue();
+	axis_z.update_data(accel.getZ());
+	//accel_Z.update(accel.getZ());
+	//accelZ = accel_Z.getValue();
 }
 
 void serial_Cmd() {
@@ -175,7 +179,7 @@ void serial_Cmd() {
 
 void serial_Info() {
 	if (show_info1) {
-		Serial.println(String("accel_x: ") + axis_x.accel + "; accel_z: " + accelZ);
+		Serial.println(String("accel_x: ") + axis_x.accel + "; accel_z: " + axis_z.accel);
 	}
 	if (show_info2) {
 	}
@@ -436,36 +440,23 @@ void setup() {
 	aimAngleY = servoAngleY;
 	aimAccelZ = aimZ;
 
-/*
-if (axis_x_eemem.first_init != 2) {
-		axis_x_eemem.first_init = 2;
-		axis_x_eemem.servoAngle = 90;
-		axis_x_eemem.pid_kp = .015;
-		axis_x_eemem.pid_ki = 0;
-		axis_x_eemem.pid_kd = 0;
-	}
-	axis_x.servoAngle = axis_x_eemem.servoAngle;
-	axis_x.pid_kp = axis_x_eemem.pid_kp;
-	axis_x.pid_ki = axis_x_eemem.pid_ki;
-	axis_x.pid_kd = axis_x_eemem.pid_kd;
-	axis_x.update_pid_tun();
-	*/
 	axis_x.servo.attach(5);
 	axis_x.servo.write(axis_x.servoAngle);
-	//axis_x.threshold = THRESHOLD_X;
 
+	axis_z.servo.attach(6);
+	axis_z.servo.write(axis_z.servoAngle);
 
-	servoZ.attach(6);
-	servoZ.write(servoAngleZ);
+	//servoZ.attach(6);
+	//servoZ.write(servoAngleZ);
 
 	servoY.attach(7);
 	servoY.write(servoAngleY);
 
-	Z_Pid.SetMode(AUTOMATIC);
-	Z_Pid.SetOutputLimits(-90, 90);
-	Z_Pid.SetSampleTime(20);
+	//Z_Pid.SetMode(AUTOMATIC);
+	//Z_Pid.SetOutputLimits(-90, 90);
+	//Z_Pid.SetSampleTime(20);
 
-	accel_Z.setAverageAmount(10);
+	//accel_Z.setAverageAmount(10);
 
 	delay(500);
 
@@ -495,6 +486,7 @@ void loop() {
 	if (get_accel_data.shouldRun())
 		get_accel_data.run();
 
+	/*
 	if (Z_Pid.Compute()) {
 		if (state == GO_XZ || state == GO_Z) {
 			if (abs(accelZ-aimAccelZ) > thrZ) {
@@ -504,8 +496,11 @@ void loop() {
 			}
 		}
 	}
+	*/
 
 	axis_x.process_PID(state == GO_XZ || state == GO_X);
+
+	axis_z.process_PID(state == GO_XZ || state == GO_Z);
 
 	if (serial_info.shouldRun())
 		serial_info.run();
