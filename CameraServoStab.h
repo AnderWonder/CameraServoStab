@@ -11,28 +11,22 @@ public:
 	double accel;
 	double aimAccel;
 	double servoStep;
-	uint8_e first_init;
-	float_e servoAngle;
-	double_e pid_kp;
-	double_e pid_ki;
-	double_e pid_kd;
+	byte first_init;
+	float servoAngle;
+	double pid_kp;
+	double pid_ki;
+	double pid_kd;
 	PID *pid;
 	byte threshold;
 	Servo servo;
 	ResponsiveAnalogRead *input_accel;
 	Axis() {
-		if (first_init != 1) {
-			first_init = 1;
-			pid_kp = .015;
-			pid_ki = 0;
-			pid_kd = 0;
-		}
 		pid = new PID(&accel, &servoStep, &aimAccel, pid_kp, pid_ki, pid_kd,
 		REVERSE);
 		pid->SetMode(AUTOMATIC);
 		pid->SetOutputLimits(-90, 90);
 		pid->SetSampleTime(20);
-		input_accel = new ResponsiveAnalogRead(false, .01);
+		input_accel = new ResponsiveAnalogRead(false);
 		input_accel->setAverageAmount(10);
 	}
 
