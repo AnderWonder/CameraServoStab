@@ -33,7 +33,7 @@ Thread get_angle_Y = Thread();
 
 Thread serial_info = Thread();
 
-//Thread radio_cmd = Thread();
+Thread radio_cmd = Thread();
 
 Thread Y_moving = Thread();
 
@@ -45,27 +45,19 @@ ResponsiveAnalogRead accel_Z(false, .01);
 
 CmdParser cmdParser;
 
-Servo servoZ, servoY, servoX;
+Servo servoZ, servoY;
 
 Adafruit_ADXL345_Unified accel = Adafruit_ADXL345_Unified(12345);
 
 double accelZ;
-int16_e aimZ EEMEM;
 double aimAccelZ;
+int16_e aimZ EEMEM;
 int16_e servoAngleZ EEMEM;
 double servoStepZ;
-PID Z_Pid(&accelZ, &servoStepZ, &aimAccelZ, .023, 0, 0.0005, REVERSE);
+PID Z_Pid(&accelZ, &servoStepZ, &aimAccelZ, .01, 0, 0.0005, REVERSE);
 
-struct Axis_eemem {
-	uint8_e first_init;
-	float_e servoAngle;
-	double_e pid_kp;
-	double_e pid_ki;
-	double_e pid_kd;
-};
-
-Axis axis_x;
 Axis_eemem axis_x_eemem EEMEM;
+Axis axis_x(&axis_x_eemem,THRESHOLD_X);
 
 byte thrX = THRESHOLD_X, thrZ = THRESHOLD_Z;
 
@@ -187,151 +179,147 @@ void serial_Info() {
 	}
 	if (show_info2) {
 	}
-	/*
-	 if (show_info3) {
-	 Serial.print("Received by radio:");
-	 Serial.println(String((char*) rx_data));
-	 show_info3 = false;
-	 }
-	 */
+	if (show_info3) {
+		Serial.print("Received by radio:");
+		Serial.println(String((char*) rx_data));
+		show_info3 = false;
+	}
 }
 
-/*
- void radio_Cmd() {
- if (got_radio) {
+void radio_Cmd() {
+	if (got_radio) {
 
- String radio_cmd = String((char*) rx_data);
+		String radio_cmd = String((char*) rx_data);
 
- int Y_moving_val = radio_cmd.substring(0, radio_cmd.indexOf(';')).toInt();
- Y_moving_speed = abs(Y_moving_val);
- if (Y_moving_speed > 1) {
+		int Y_moving_val = radio_cmd.substring(0, radio_cmd.indexOf(';')).toInt();
+		Y_moving_speed = abs(Y_moving_val);
+		if (Y_moving_speed > 1) {
 
- aimAngleY = Y_moving_val > 0 ? 180 : 0;
+			aimAngleY = Y_moving_val > 0 ? 180 : 0;
 
- if (Y_moving_speed > 8)
- Y_moving_speed = Y_SPEED_FAST;
- else if (Y_moving_speed > 4)
- Y_moving_speed = Y_SPEED_MIDLE;
- else if (Y_moving_speed > 1)
- Y_moving_speed = Y_SPEED_SLOW;
+			if (Y_moving_speed > 8)
+				Y_moving_speed = Y_SPEED_FAST;
+			else if (Y_moving_speed > 4)
+				Y_moving_speed = Y_SPEED_MIDLE;
+			else if (Y_moving_speed > 1)
+				Y_moving_speed = Y_SPEED_SLOW;
 
- Y_moving.setInterval(Y_moving_speed);
- }
- else {
- aimAngleY = servoAngleY;
+			Y_moving.setInterval(Y_moving_speed);
+		}
+		else {
+			aimAngleY = servoAngleY;
 
- }
+		}
 
- radio_cmd = radio_cmd.substring(radio_cmd.indexOf(';') + 1);
- int X_moving_val = radio_cmd.substring(0, radio_cmd.indexOf(';')).toInt();
- X_moving_direction = X_moving_val >= 0 ? 1 : -1;
- X_moving_speed = abs(X_moving_val);
- if (X_moving_speed > 7) {
- if (X_moving_speed > 7) {
- X_moving.setInterval(5);
- }
- else
- X_moving.setInterval(25);
- X_moving.enabled = true;
- }
- else {
- X_moving.enabled = false;
- }
+		radio_cmd = radio_cmd.substring(radio_cmd.indexOf(';') + 1);
+		int X_moving_val = radio_cmd.substring(0, radio_cmd.indexOf(';')).toInt();
+		X_moving_direction = X_moving_val >= 0 ? 1 : -1;
+		X_moving_speed = abs(X_moving_val);
+		if (X_moving_speed > 7) {
+			if (X_moving_speed > 7) {
+				X_moving.setInterval(5);
+			}
+			else
+				X_moving.setInterval(25);
+			X_moving.enabled = true;
+		}
+		else {
+			X_moving.enabled = false;
+		}
 
- radio_cmd = radio_cmd.substring(radio_cmd.indexOf(';') + 1);
- int button_0_now = radio_cmd.substring(0, radio_cmd.indexOf(';')).toInt();
+		radio_cmd = radio_cmd.substring(radio_cmd.indexOf(';') + 1);
+		int button_0_now = radio_cmd.substring(0, radio_cmd.indexOf(';')).toInt();
 
- radio_cmd = radio_cmd.substring(radio_cmd.indexOf(';') + 1);
- int button_1_now = radio_cmd.substring(0, radio_cmd.indexOf(';')).toInt();
+		radio_cmd = radio_cmd.substring(radio_cmd.indexOf(';') + 1);
+		int button_1_now = radio_cmd.substring(0, radio_cmd.indexOf(';')).toInt();
 
- radio_cmd = radio_cmd.substring(radio_cmd.indexOf(';') + 1);
- int button_2_now = radio_cmd.substring(0, radio_cmd.indexOf(';')).toInt();
+		radio_cmd = radio_cmd.substring(radio_cmd.indexOf(';') + 1);
+		int button_2_now = radio_cmd.substring(0, radio_cmd.indexOf(';')).toInt();
 
- radio_cmd = radio_cmd.substring(radio_cmd.indexOf(';') + 1);
- int button_3_now = radio_cmd.substring(0, radio_cmd.indexOf(';')).toInt();
+		radio_cmd = radio_cmd.substring(radio_cmd.indexOf(';') + 1);
+		int button_3_now = radio_cmd.substring(0, radio_cmd.indexOf(';')).toInt();
 
- if (button_0_now != button_0_state) {
- if (button_0_now) { //pressed
- button_0_time = millis();
- }
- else { //released
- if (millis() - button_0_time > LONG_PRESS_DELAY) {
+		if (button_0_now != button_0_state) {
+			if (button_0_now) { //pressed
+				button_0_time = millis();
+			}
+			else { //released
+				if (millis() - button_0_time > LONG_PRESS_DELAY) {
 
- }
- else {
- switch (state) {
- case GO_XZ:
- state = GO_Z;
- break;
- case GO_Z:
- state = STOP;
- break;
- case STOP:
- axis_x.aimAccel = axis_x.accel;
- if (button_1_now) {
- aimAccelZ = aimZ = accelZ;
- button_1_now = button_1_state = 0;
- }
- state = GO_XZ;
- }
- }
- }
- }
- button_0_state = button_0_now;
+				}
+				else {
+					switch (state) {
+					case GO_XZ:
+						state = GO_Z;
+						break;
+					case GO_Z:
+						state = STOP;
+						break;
+					case STOP:
+						axis_x.aimAccel = axis_x.accel;
+						if (button_1_now) {
+							aimAccelZ = aimZ = accelZ;
+							button_1_now = button_1_state = 0;
+						}
+						state = GO_XZ;
+					}
+				}
+			}
+		}
+		button_0_state = button_0_now;
 
- if (button_1_now != button_1_state) {
- if (button_1_now) { //pressed
- button_1_time = millis();
- }
- else { //released
- if (millis() - button_1_time > LONG_PRESS_DELAY) {
- Y_preset_1 = servoAngleY;
- }
- else {
- aimAngleY = Y_preset_1;
- Y_moving.setInterval(Y_SPEED_FAST);
- }
- }
- }
- button_1_state = button_1_now;
+		if (button_1_now != button_1_state) {
+			if (button_1_now) { //pressed
+				button_1_time = millis();
+			}
+			else { //released
+				if (millis() - button_1_time > LONG_PRESS_DELAY) {
+					Y_preset_1 = servoAngleY;
+				}
+				else {
+					aimAngleY = Y_preset_1;
+					Y_moving.setInterval(Y_SPEED_FAST);
+				}
+			}
+		}
+		button_1_state = button_1_now;
 
- if (button_2_now != button_2_state) {
- if (button_2_now) { //pressed
- button_2_time = millis();
- }
- else { //released
- if (millis() - button_2_time > LONG_PRESS_DELAY) {
- Y_preset_2 = servoAngleY;
- }
- else {
- aimAngleY = Y_preset_2;
- Y_moving.setInterval(Y_SPEED_FAST);
- }
- }
- }
- button_2_state = button_2_now;
+		if (button_2_now != button_2_state) {
+			if (button_2_now) { //pressed
+				button_2_time = millis();
+			}
+			else { //released
+				if (millis() - button_2_time > LONG_PRESS_DELAY) {
+					Y_preset_2 = servoAngleY;
+				}
+				else {
+					aimAngleY = Y_preset_2;
+					Y_moving.setInterval(Y_SPEED_FAST);
+				}
+			}
+		}
+		button_2_state = button_2_now;
 
- if (button_3_now != button_3_state) {
- if (button_3_now) { //pressed
- button_3_time = millis();
- }
- else { //released
- if (millis() - button_3_time > LONG_PRESS_DELAY) {
- Y_preset_3 = servoAngleY;
- }
- else {
- aimAngleY = Y_preset_3;
- Y_moving.setInterval(Y_SPEED_FAST);
- }
- }
- }
- button_3_state = button_3_now;
+		if (button_3_now != button_3_state) {
+			if (button_3_now) { //pressed
+				button_3_time = millis();
+			}
+			else { //released
+				if (millis() - button_3_time > LONG_PRESS_DELAY) {
+					Y_preset_3 = servoAngleY;
+				}
+				else {
+					aimAngleY = Y_preset_3;
+					Y_moving.setInterval(Y_SPEED_FAST);
+				}
+			}
+		}
+		button_3_state = button_3_now;
 
- got_radio = false;
+		got_radio = false;
 
- }
- }
- */
+	}
+}
 
 void Y_Moving() {
 	char Y_moving_direction = 0;
@@ -369,7 +357,7 @@ void X_Moving() {
 	else {
 		axis_x.servoAngle -= X_moving_direction;
 		axis_x.servoAngle = checkServoAngle(axis_x.servoAngle);
-		servoX.write(axis_x.servoAngle);
+		axis_x.servo.write(axis_x.servoAngle);
 		axis_x.aimAccel = axis_x.accel;
 	}
 }
@@ -406,8 +394,8 @@ void initThreads() {
 	serial_cmd.onRun(serial_Cmd);
 	serial_cmd.setInterval(200);
 
-	//radio_cmd.onRun(radio_Cmd);
-	//radio_cmd.setInterval(100);
+	radio_cmd.onRun(radio_Cmd);
+	radio_cmd.setInterval(100);
 
 	get_accel_data.onRun(get_accel_Data);
 	get_accel_data.setInterval(1);
@@ -435,21 +423,21 @@ void setup() {
 	Serial.begin(9600);
 	Serial.println("Program start");
 
-	if (eeprom_writen != 3) {
-		axis_x.servoAngle = 90;
+	if (eeprom_writen != 9) {
 		servoAngleZ = 90;
 		Y_preset_1 = 0;
 		Y_preset_2 = 90;
 		Y_preset_3 = 180;
 		servoAngleY = 90;
 		aimAccelZ = aimZ = AIM_FOR_Z;
-		eeprom_writen = 3;
+		eeprom_writen = 9;
 		Serial.println("Init eeprom");
 	}
 	aimAngleY = servoAngleY;
 	aimAccelZ = aimZ;
 
-	if (axis_x_eemem.first_init != 2) {
+/*
+if (axis_x_eemem.first_init != 2) {
 		axis_x_eemem.first_init = 2;
 		axis_x_eemem.servoAngle = 90;
 		axis_x_eemem.pid_kp = .015;
@@ -461,9 +449,11 @@ void setup() {
 	axis_x.pid_ki = axis_x_eemem.pid_ki;
 	axis_x.pid_kd = axis_x_eemem.pid_kd;
 	axis_x.update_pid_tun();
+	*/
 	axis_x.servo.attach(5);
 	axis_x.servo.write(axis_x.servoAngle);
-	axis_x.threshold = THRESHOLD_X;
+	//axis_x.threshold = THRESHOLD_X;
+
 
 	servoZ.attach(6);
 	servoZ.write(servoAngleZ);
@@ -526,8 +516,8 @@ void loop() {
 	if (X_moving.shouldRun())
 		X_moving.run();
 
-	//if (radio_cmd.shouldRun())
-	//	radio_cmd.run();
+	if (radio_cmd.shouldRun())
+		radio_cmd.run();
 
 	if (pid_frontend_processing.shouldRun())
 		pid_frontend_processing.run();
@@ -593,9 +583,10 @@ void pid_frontend_serial_receive(String *buffer) {
 			frontend_axis->pid_ki = double(foo.asFloat[4]) / kf;           //
 			frontend_axis->pid_kd = double(foo.asFloat[5]) / kf;
 
-			axis_x_eemem.pid_kp = frontend_axis->pid_kp;
-			axis_x_eemem.pid_ki = frontend_axis->pid_ki;
-			axis_x_eemem.pid_kd = frontend_axis->pid_kd;
+			frontend_axis->save_pid_tun();
+			//axis_x_eemem.pid_kp = frontend_axis->pid_kp;
+			//axis_x_eemem.pid_ki = frontend_axis->pid_ki;
+			//axis_x_eemem.pid_kd = frontend_axis->pid_kd;
 
 			frontend_axis->update_pid_tun();
 
