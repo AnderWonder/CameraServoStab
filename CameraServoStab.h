@@ -35,11 +35,11 @@ public:
 
 	Axis_eemem *eemem_data;
 
-	Axis(Axis_eemem *eemem_data,byte threshold) {
+	Axis(Axis_eemem *eemem_data, byte threshold) {
 
 		this->threshold = threshold;
 
-		this->eemem_data=eemem_data;
+		this->eemem_data = eemem_data;
 		if (eemem_data->first_init != 5) {
 			eemem_data->first_init = 5;
 			eemem_data->servoAngle = 90;
@@ -63,7 +63,7 @@ public:
 		pid->SetSampleTime(20);
 		update_pid_tun();
 
-		input_accel = new ResponsiveAnalogRead(false,0.01);
+		input_accel = new ResponsiveAnalogRead(false, 0.01);
 		input_accel->setAverageAmount(10);
 
 	}
@@ -78,14 +78,12 @@ public:
 	}
 
 	void process_PID(bool servo_enable) {
-		if (pid->Compute()) {
-			if (servo_enable) {
-				if (abs(accel - aimAccel) > threshold) {
-					servoAngle += (float) servoStep;
-					servoAngle = checkServoAngle(servoAngle);
-					servo.write(round(servoAngle));
-					eemem_data->servoAngle=servoAngle;
-				}
+		if (pid->Compute() && servo_enable) {
+			if (abs(accel - aimAccel) > threshold) {
+				servoAngle += (float) servoStep;
+				servoAngle = checkServoAngle(servoAngle);
+				servo.write(round(servoAngle));
+				eemem_data->servoAngle = servoAngle;
 			}
 		}
 	}
@@ -98,11 +96,12 @@ public:
 		return servoAngle;
 	}
 
-	void save_pid_tun(){
+	void save_pid_tun() {
 		eemem_data->pid_kp = pid_kp;
 		eemem_data->pid_ki = pid_ki;
 		eemem_data->pid_kd = pid_kd;
 	}
 
 };
+
 #endif

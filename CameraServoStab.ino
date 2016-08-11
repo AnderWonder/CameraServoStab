@@ -4,6 +4,7 @@
 #include <se8r01.h>
 #include <CmdParser.hpp>
 #include <Thread.h>
+#include <ThreadController.h>
 #include <ResponsiveAnalogRead.h>
 #include <PinChangeInterrupt.h>
 #include <EEPROM.h>
@@ -23,7 +24,7 @@ bool show_info2 = false;
 bool show_info3 = false;
 bool pid_frontend = false;
 
-ThreadController thread_controller = ThreadController();
+ThreadController threads_controller = ThreadController();
 
 Thread serial_cmd = Thread();
 Thread get_accel_data = Thread();
@@ -66,12 +67,13 @@ enum STATE {
 int state = START_STATE;
 int prev_state = START_STATE;
 
-int kf = 100;
+int pid_kf = 100;
 
 byte radio_rx_data[] = { "-10;-10;0;0;0;0;" };
 
 bool got_radio = false;
 
+//todo:make class for buttons
 int button_0_state = 0;
 unsigned long button_0_time;
 int button_1_state = 0;
@@ -136,8 +138,7 @@ void serial_Cmd() {
 
 void serial_Info() {
 	if (show_info1) {
-		Serial.println(
-				String("accel_x: ") + axis_x.accel + "; accel_z: " + axis_z.accel);
+		Serial.println(String("accel_x: ") + axis_x.accel + "; accel_z: " + axis_z.accel);
 	}
 	if (show_info2) {
 	}
@@ -149,6 +150,7 @@ void serial_Info() {
 }
 
 void radio_Cmd() {
+	//todo:refactor to use CmdParser
 	if (got_radio) {
 
 		String radio_cmd = String((char*) radio_rx_data);
@@ -167,10 +169,8 @@ void radio_Cmd() {
 				Y_moving_speed = Y_SPEED_SLOW;
 
 			Y_moving.setInterval(Y_moving_speed);
-		}
-		else {
+		} else {
 			aimAngleY = servoAngleY;
-
 		}
 
 		radio_cmd = radio_cmd.substring(radio_cmd.indexOf(';') + 1);
@@ -180,12 +180,10 @@ void radio_Cmd() {
 		if (X_moving_speed > 7) {
 			if (X_moving_speed > 7) {
 				X_moving.setInterval(5);
-			}
-			else
+			} else
 				X_moving.setInterval(25);
 			X_moving.enabled = true;
-		}
-		else {
+		} else {
 			X_moving.enabled = false;
 		}
 
@@ -204,26 +202,24 @@ void radio_Cmd() {
 		if (button_0_now != button_0_state) {
 			if (button_0_now) { //pressed
 				button_0_time = millis();
-			}
-			else { //released
+			} else { //released
 				if (millis() - button_0_time > LONG_PRESS_DELAY) {
 
-				}
-				else {
+				} else {
 					switch (state) {
-					case GO_XZ:
-						state = GO_Z;
-						break;
-					case GO_Z:
-						state = STOP;
-						break;
-					case STOP:
-						axis_x.aimAccel = axis_x.accel;
-						if (button_1_now) {
-							axis_z.aimAccel = axis_z.eemem_data->aim = axis_z.accel;
-							button_1_now = button_1_state = 0;
-						}
-						state = GO_XZ;
+						case GO_XZ:
+							state = GO_Z;
+							break;
+						case GO_Z:
+							state = STOP;
+							break;
+						case STOP:
+							axis_x.aimAccel = axis_x.accel;
+							if (button_1_now) {
+								axis_z.aimAccel = axis_z.eemem_data->aim = axis_z.accel;
+								button_1_now = button_1_state = 0;
+							}
+							state = GO_XZ;
 					}
 				}
 			}
@@ -233,12 +229,10 @@ void radio_Cmd() {
 		if (button_1_now != button_1_state) {
 			if (button_1_now) { //pressed
 				button_1_time = millis();
-			}
-			else { //released
+			} else { //released
 				if (millis() - button_1_time > LONG_PRESS_DELAY) {
 					Y_preset_1 = servoAngleY;
-				}
-				else {
+				} else {
 					aimAngleY = Y_preset_1;
 					Y_moving.setInterval(Y_SPEED_FAST);
 				}
@@ -249,12 +243,10 @@ void radio_Cmd() {
 		if (button_2_now != button_2_state) {
 			if (button_2_now) { //pressed
 				button_2_time = millis();
-			}
-			else { //released
+			} else { //released
 				if (millis() - button_2_time > LONG_PRESS_DELAY) {
 					Y_preset_2 = servoAngleY;
-				}
-				else {
+				} else {
 					aimAngleY = Y_preset_2;
 					Y_moving.setInterval(Y_SPEED_FAST);
 				}
@@ -265,12 +257,10 @@ void radio_Cmd() {
 		if (button_3_now != button_3_state) {
 			if (button_3_now) { //pressed
 				button_3_time = millis();
-			}
-			else { //released
+			} else { //released
 				if (millis() - button_3_time > LONG_PRESS_DELAY) {
 					Y_preset_3 = servoAngleY;
-				}
-				else {
+				} else {
 					aimAngleY = Y_preset_3;
 					Y_moving.setInterval(Y_SPEED_FAST);
 				}
@@ -297,10 +287,11 @@ void Y_Moving() {
 		else if (aimAngleY < servoAngleY)
 			Y_moving_direction = -1;
 		servoAngleY += Y_moving_direction;
-		servoAngleY = checkServoAngle(servoAngleY);
 		servoY.write(servoAngleY);
-	}
-	else {
+		servoAngleY = servoY.read();//fixing bounds if overflow
+	} else {
+
+		//todo:fix bug, when speed only changes
 		if (!Y_moving_start) {
 			state = prev_state;
 			Y_moving_start = true;
@@ -315,12 +306,11 @@ void X_Moving() {
 			axis_x.aimAccel = 250;
 		if (axis_x.aimAccel < -250)
 			axis_x.aimAccel = -250;
-		axis_x.eemem_data->aim=axis_x.aimAccel;
-	}
-	else {
+		axis_x.eemem_data->aim = axis_x.aimAccel;
+	} else {
 		axis_x.servoAngle -= X_moving_direction;
-		axis_x.servoAngle = checkServoAngle(axis_x.servoAngle);
 		axis_x.servo.write(axis_x.servoAngle);
+		axis_x.servoAngle=axis_x.servo.read();
 		axis_x.aimAccel = axis_x.accel;
 	}
 }
@@ -337,12 +327,10 @@ void pid_frontend_Processing() {
 		pid_frontend_serial_send();
 }
 //********************************* THREADS
-
 void init_radio() {
 	if (!init_rf(10, 9, 8, sizeof(radio_rx_data))) {
 		Serial.println("Radio chip not found!");
-	}
-	else {
+	} else {
 		attachPCINT(digitalPinToPCINT(IRQ_pin), radio_ISR, CHANGE);
 		Serial.println("Radio connected");
 		changeMode(RX_MODE);
@@ -354,32 +342,33 @@ void initThreads() {
 
 	serial_info.onRun(serial_Info);
 	serial_info.setInterval(100);
+	threads_controller.add(&serial_info);
 
 	serial_cmd.onRun(serial_Cmd);
 	serial_cmd.setInterval(200);
+	threads_controller.add(&serial_cmd);
 
 	radio_cmd.onRun(radio_Cmd);
 	radio_cmd.setInterval(100);
+	threads_controller.add(&radio_cmd);
 
 	get_accel_data.onRun(get_accel_Data);
 	get_accel_data.setInterval(1);
+	threads_controller.add(&get_accel_data);
 
 	Y_moving.onRun(Y_Moving);
 	Y_moving.setInterval(50);
+	threads_controller.add(&Y_moving);
 
 	X_moving.onRun(X_Moving);
 	X_moving.setInterval(100);
 	X_moving.enabled = false;
+	threads_controller.add(&X_moving);
 
 	pid_frontend_processing.onRun(pid_frontend_Processing);
 	pid_frontend_processing.setInterval(50);
-}
+	threads_controller.add(&pid_frontend_processing);
 
-void connect_PID_frontend(Axis *axis) {
-	frontend_axis = axis;
-	Setpoint = &axis->aimAccel;
-	Input = &axis->accel;
-	Output = &axis->servoStep;
 }
 
 void init_servos() {
@@ -434,39 +423,19 @@ void setup() {
 
 void loop() {
 
-	if (serial_cmd.shouldRun())
-		serial_cmd.run();
-
-	if (get_accel_data.shouldRun())
-		get_accel_data.run();
+	threads_controller.run();
 
 	axis_x.process_PID(state == GO_XZ || state == GO_X);
 
 	axis_z.process_PID(state == GO_XZ || state == GO_Z);
 
-	if (serial_info.shouldRun())
-		serial_info.run();
-
-	if (Y_moving.shouldRun())
-		Y_moving.run();
-
-	if (X_moving.shouldRun())
-		X_moving.run();
-
-	if (radio_cmd.shouldRun())
-		radio_cmd.run();
-
-	if (pid_frontend_processing.shouldRun())
-		pid_frontend_processing.run();
-
 }
 
-float checkServoAngle(float servoAngle) {
-	if (servoAngle > 180)
-		servoAngle = 180;
-	if (servoAngle < 0)
-		servoAngle = 0;
-	return servoAngle;
+void connect_PID_frontend(Axis *axis) {
+	frontend_axis = axis;
+	Setpoint = &axis->aimAccel;
+	Input = &axis->accel;
+	Output = &axis->servoStep;
 }
 
 //*********************************************************PID FRONTEND
@@ -515,9 +484,9 @@ void pid_frontend_serial_receive(String *buffer) {
 				*Output = double(foo.asFloat[2]); //   output blip, then the controller will
 			}                                     //   overwrite.
 
-			frontend_axis->pid_kp = double(foo.asFloat[3]) / kf;           //
-			frontend_axis->pid_ki = double(foo.asFloat[4]) / kf;           //
-			frontend_axis->pid_kd = double(foo.asFloat[5]) / kf;
+			frontend_axis->pid_kp = double(foo.asFloat[3]) / pid_kf;           //
+			frontend_axis->pid_ki = double(foo.asFloat[4]) / pid_kf;           //
+			frontend_axis->pid_kd = double(foo.asFloat[5]) / pid_kf;
 
 			frontend_axis->save_pid_tun();
 			//axis_x_eemem.pid_kp = frontend_axis->pid_kp;
@@ -544,16 +513,16 @@ void pid_frontend_serial_send() {
 	Serial.print(" ");
 	Serial.print(*Output);
 	Serial.print(" ");
-	Serial.print(frontend_axis->pid->GetKp() * kf);
+	Serial.print(frontend_axis->pid->GetKp() * pid_kf);
 	Serial.print(" ");
-	Serial.print(frontend_axis->pid->GetKi() * kf);
+	Serial.print(frontend_axis->pid->GetKi() * pid_kf);
 	Serial.print(" ");
-	Serial.print(frontend_axis->pid->GetKd() * kf);
+	Serial.print(frontend_axis->pid->GetKd() * pid_kf);
 	Serial.print(" ");
 	if (frontend_axis->pid->GetMode() == AUTOMATIC)
 		Serial.print("Automatic");
 	else
 		Serial.print("Manual");
 	Serial.print(" ");
-	Serial.println((frontend_axis==&axis_x)?"X":"Z");
+	Serial.println((frontend_axis == &axis_x) ? "X" : "Z");
 }
