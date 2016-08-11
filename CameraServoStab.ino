@@ -23,25 +23,20 @@ bool show_info2 = false;
 bool show_info3 = false;
 bool pid_frontend = false;
 
+ThreadController thread_controller = ThreadController();
+
 Thread serial_cmd = Thread();
-
 Thread get_accel_data = Thread();
-
 Thread get_angle_Y = Thread();
-
 Thread serial_info = Thread();
-
 Thread radio_cmd = Thread();
-
 Thread Y_moving = Thread();
-
 Thread X_moving = Thread();
-
 Thread pid_frontend_processing = Thread();
 
 CmdParser cmdParser;
 
-Servo servoY;
+uint8_e eeprom_writen EEMEM;
 
 Adafruit_ADXL345_Unified accel = Adafruit_ADXL345_Unified(12345);
 
@@ -51,11 +46,11 @@ Axis axis_x(&axis_x_eemem, THRESHOLD_X);
 Axis_eemem axis_z_eemem EEMEM;
 Axis axis_z(&axis_z_eemem, THRESHOLD_Z);
 
+Servo servoY;
 int Y_moving_speed;
 int Y_moving_direction;
 int aimAngleY;
 bool Y_moving_start = true;
-uint8_e eeprom_writen EEMEM;
 int16_e servoAngleY EEMEM;
 uint8_e Y_preset_1 EEMEM;
 uint8_e Y_preset_2 EEMEM;
@@ -73,7 +68,7 @@ int prev_state = START_STATE;
 
 int kf = 100;
 
-byte rx_data[] = { "-10;-10;0;0;0;0;" };
+byte radio_rx_data[] = { "-10;-10;0;0;0;0;" };
 
 bool got_radio = false;
 
@@ -86,8 +81,8 @@ unsigned long button_2_time;
 int button_3_state = 0;
 unsigned long button_3_time;
 
-double *Setpoint, *Input, *Output;
 Axis *frontend_axis;
+double *Setpoint, *Input, *Output;
 
 //********************************* THREADS
 void get_accel_Data() {
@@ -148,7 +143,7 @@ void serial_Info() {
 	}
 	if (show_info3) {
 		Serial.print("Received by radio:");
-		Serial.println(String((char*) rx_data));
+		Serial.println(String((char*) radio_rx_data));
 		show_info3 = false;
 	}
 }
@@ -156,7 +151,7 @@ void serial_Info() {
 void radio_Cmd() {
 	if (got_radio) {
 
-		String radio_cmd = String((char*) rx_data);
+		String radio_cmd = String((char*) radio_rx_data);
 
 		int Y_moving_val = radio_cmd.substring(0, radio_cmd.indexOf(';')).toInt();
 		Y_moving_speed = abs(Y_moving_val);
@@ -332,7 +327,7 @@ void X_Moving() {
 
 void radio_ISR() {
 	if (digitalRead(IRQ_pin) == LOW) {
-		getRxData(rx_data);
+		getRxData(radio_rx_data);
 		got_radio = true;
 	}
 }
@@ -344,7 +339,7 @@ void pid_frontend_Processing() {
 //********************************* THREADS
 
 void init_radio() {
-	if (!init_rf(10, 9, 8, sizeof(rx_data))) {
+	if (!init_rf(10, 9, 8, sizeof(radio_rx_data))) {
 		Serial.println("Radio chip not found!");
 	}
 	else {
@@ -387,42 +382,51 @@ void connect_PID_frontend(Axis *axis) {
 	Output = &axis->servoStep;
 }
 
+void init_servos() {
+	axis_x.servo.attach(5);
+	axis_x.servo.write(axis_x.servoAngle);
+	axis_z.servo.attach(6);
+	axis_z.servo.write(axis_z.servoAngle);
+	servoY.attach(7);
+	servoY.write(servoAngleY);
+}
+
+void init_accel() {
+	delay(100);
+	if (!accel.begin()) {
+		Serial.println("No ADXL345 detected ...");
+		while (1);
+
+	}
+	accel.setRange(ADXL345_RANGE_2_G);
+	accel.setDataRate(ADXL345_DATARATE_3200_HZ);
+}
+
+void set_default_values_for_eeprom_vars() {
+	Y_preset_1 = 180;
+	Y_preset_2 = 90;
+	Y_preset_3 = 0;
+	servoAngleY = 90;
+	eeprom_writen = 9;
+}
+
 void setup() {
 
 	Serial.begin(9600);
 	Serial.println("Program start");
 
 	if (eeprom_writen != 9) {
-		Y_preset_1 = 180;
-		Y_preset_2 = 90;
-		Y_preset_3 = 0;
-		servoAngleY = 90;
-		eeprom_writen = 9;
+		set_default_values_for_eeprom_vars();
 	}
 	aimAngleY = servoAngleY;
 
-	axis_x.servo.attach(5);
-	axis_x.servo.write(axis_x.servoAngle);
+	cmdParser.setOptKeyValue(true);
 
-	axis_z.servo.attach(6);
-	axis_z.servo.write(axis_z.servoAngle);
+	init_servos();
 
-	servoY.attach(7);
-	servoY.write(servoAngleY);
-
-	delay(500);
-
-	if (!accel.begin()) {
-		Serial.println("No ADXL345 detected ...");
-		while (1)
-			;
-	}
-	accel.setRange(ADXL345_RANGE_2_G);
-	accel.setDataRate(ADXL345_DATARATE_3200_HZ);
+	init_accel();
 
 	initThreads();
-
-	cmdParser.setOptKeyValue(true);
 
 	init_radio();
 
