@@ -17,20 +17,28 @@ struct Axis_eemem {
 
 class Axis {
 public:
+
 	double accel;
 	double aimAccel;
+	ResponsiveAnalogRead *input_accel;
+
+	Servo servo;
 	double servoStep;
-	byte first_init;
 	float servoAngle;
+
 	double pid_kp;
 	double pid_ki;
 	double pid_kd;
 	PID *pid;
+
 	byte threshold;
-	Servo servo;
-	ResponsiveAnalogRead *input_accel;
+
 	Axis_eemem *eemem_data;
+
 	Axis(Axis_eemem *eemem_data,byte threshold) {
+
+		this->threshold = threshold;
+
 		this->eemem_data=eemem_data;
 		if (eemem_data->first_init != 5) {
 			eemem_data->first_init = 5;
@@ -40,26 +48,24 @@ public:
 			eemem_data->pid_kd = 0;
 			eemem_data->aim = 0;
 		}
+
+		aimAccel = eemem_data->aim;
+		servoAngle = eemem_data->servoAngle;
+
+		pid_kp = eemem_data->pid_kp;
+		pid_ki = eemem_data->pid_ki;
+		pid_kd = eemem_data->pid_kd;
+
 		pid = new PID(&accel, &servoStep, &aimAccel, pid_kp, pid_ki, pid_kd,
 		REVERSE);
 		pid->SetMode(AUTOMATIC);
 		pid->SetOutputLimits(-90, 90);
 		pid->SetSampleTime(20);
-
-		pid_kp = eemem_data->pid_kp;
-		pid_ki = eemem_data->pid_ki;
-		pid_kd = eemem_data->pid_kd;
 		update_pid_tun();
 
-		input_accel = new ResponsiveAnalogRead(false);
+		input_accel = new ResponsiveAnalogRead(false,0.01);
 		input_accel->setAverageAmount(10);
 
-		aimAccel = eemem_data->aim;
-		servoAngle = eemem_data->servoAngle;
-
-
-
-		this->threshold = threshold;
 	}
 
 	void update_pid_tun() {
@@ -78,6 +84,7 @@ public:
 					servoAngle += (float) servoStep;
 					servoAngle = checkServoAngle(servoAngle);
 					servo.write(round(servoAngle));
+					eemem_data->servoAngle=servoAngle;
 				}
 			}
 		}
@@ -96,5 +103,6 @@ public:
 		eemem_data->pid_ki = pid_ki;
 		eemem_data->pid_kd = pid_kd;
 	}
+
 };
 #endif

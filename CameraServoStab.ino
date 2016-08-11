@@ -10,9 +10,7 @@
 #include <EEWrap.h>
 #include "CameraServoStab.h"
 
-#define AIM_FOR_X 0
-#define AIM_FOR_Z -15
-#define THRESHOLD_Z 0
+#define THRESHOLD_Z 1
 #define THRESHOLD_X 1
 #define START_STATE GO_XZ
 #define LONG_PRESS_DELAY 2000
@@ -41,28 +39,17 @@ Thread X_moving = Thread();
 
 Thread pid_frontend_processing = Thread();
 
-ResponsiveAnalogRead accel_Z(false, .01);
-
 CmdParser cmdParser;
 
-Servo servoZ, servoY;
+Servo servoY;
 
 Adafruit_ADXL345_Unified accel = Adafruit_ADXL345_Unified(12345);
 
-double accelZ;
-double aimAccelZ;
-int16_e aimZ EEMEM;
-int16_e servoAngleZ EEMEM;
-double servoStepZ;
-PID Z_Pid(&accelZ, &servoStepZ, &aimAccelZ, .01, 0, 0.0005, REVERSE);
-
 Axis_eemem axis_x_eemem EEMEM;
-Axis axis_x(&axis_x_eemem,THRESHOLD_X);
+Axis axis_x(&axis_x_eemem, THRESHOLD_X);
 
 Axis_eemem axis_z_eemem EEMEM;
-Axis axis_z(&axis_z_eemem,THRESHOLD_Z);
-
-byte thrX = THRESHOLD_X, thrZ = THRESHOLD_Z;
+Axis axis_z(&axis_z_eemem, THRESHOLD_Z);
 
 int Y_moving_speed;
 int Y_moving_direction;
@@ -106,8 +93,6 @@ Axis *frontend_axis;
 void get_accel_Data() {
 	axis_x.update_data(accel.getX());
 	axis_z.update_data(accel.getZ());
-	//accel_Z.update(accel.getZ());
-	//accelZ = accel_Z.getValue();
 }
 
 void serial_Cmd() {
@@ -127,36 +112,13 @@ void serial_Cmd() {
 				state = STOP;
 
 			if (cmdParser.equalCommand_P(PSTR("pid"))) {
-				PID *pid;
-				pid = NULL;
-				if (cmdParser.equalCmdParam_P(1, PSTR("X")))
-					pid = axis_x.pid;
-				if (cmdParser.equalCmdParam_P(1, PSTR("Z")))
-					pid = &Z_Pid;
-				if (cmdParser.equalCmdParam_P(1, PSTR("kf"))) {
-					kf =
-							String(cmdParser.getValueFromKey(cmdParser.getCmdParam(1))).toInt();
-					Serial.println(String("kf=") + kf);
-				}
 				if (cmdParser.equalCmdParam_P(1, PSTR("fr"))) {
-					pid_frontend = !pid_frontend;
+					if (cmdParser.equalCmdParam_P(2, PSTR("x")))
+						connect_PID_frontend(&axis_x);
+					if (cmdParser.equalCmdParam_P(2, PSTR("z")))
+						connect_PID_frontend(&axis_z);
+					pid_frontend = true;
 				}
-				/*
-				 if (pid != NULL) {
-				 String k(cmdParser.getCmdParam(2));
-				 float k_val = String(cmdParser.getValueFromKey(k.c_str())).toFloat();
-				 k_val /= kf;
-				 if (k == "kp") {
-				 pid->SetTunings(k_val, pid->GetKi(), pid->GetKd());
-				 }
-				 if (k == "kd") {
-				 pid->SetTunings(pid->GetKp(), pid->GetKi(), k_val);
-				 }
-				 Serial.println(
-				 String("PID: kf = ") + kf + "; kp = " + pid->GetKp() * kf
-				 + "; kd = " + pid->GetKd() * kf);
-				 }
-				 */
 			}
 
 			if (cmdParser.equalCommand_P(PSTR("info1"))) {
@@ -179,7 +141,8 @@ void serial_Cmd() {
 
 void serial_Info() {
 	if (show_info1) {
-		Serial.println(String("accel_x: ") + axis_x.accel + "; accel_z: " + axis_z.accel);
+		Serial.println(
+				String("accel_x: ") + axis_x.accel + "; accel_z: " + axis_z.accel);
 	}
 	if (show_info2) {
 	}
@@ -262,7 +225,7 @@ void radio_Cmd() {
 					case STOP:
 						axis_x.aimAccel = axis_x.accel;
 						if (button_1_now) {
-							aimAccelZ = aimZ = accelZ;
+							axis_z.aimAccel = axis_z.eemem_data->aim = axis_z.accel;
 							button_1_now = button_1_state = 0;
 						}
 						state = GO_XZ;
@@ -357,6 +320,7 @@ void X_Moving() {
 			axis_x.aimAccel = 250;
 		if (axis_x.aimAccel < -250)
 			axis_x.aimAccel = -250;
+		axis_x.eemem_data->aim=axis_x.aimAccel;
 	}
 	else {
 		axis_x.servoAngle -= X_moving_direction;
@@ -384,6 +348,7 @@ void init_radio() {
 		Serial.println("Radio chip not found!");
 	}
 	else {
+		attachPCINT(digitalPinToPCINT(IRQ_pin), radio_ISR, CHANGE);
 		Serial.println("Radio connected");
 		changeMode(RX_MODE);
 		setChannel(110);
@@ -428,17 +393,13 @@ void setup() {
 	Serial.println("Program start");
 
 	if (eeprom_writen != 9) {
-		servoAngleZ = 90;
-		Y_preset_1 = 0;
+		Y_preset_1 = 180;
 		Y_preset_2 = 90;
-		Y_preset_3 = 180;
+		Y_preset_3 = 0;
 		servoAngleY = 90;
-		aimAccelZ = aimZ = AIM_FOR_Z;
 		eeprom_writen = 9;
-		Serial.println("Init eeprom");
 	}
 	aimAngleY = servoAngleY;
-	aimAccelZ = aimZ;
 
 	axis_x.servo.attach(5);
 	axis_x.servo.write(axis_x.servoAngle);
@@ -446,17 +407,8 @@ void setup() {
 	axis_z.servo.attach(6);
 	axis_z.servo.write(axis_z.servoAngle);
 
-	//servoZ.attach(6);
-	//servoZ.write(servoAngleZ);
-
 	servoY.attach(7);
 	servoY.write(servoAngleY);
-
-	//Z_Pid.SetMode(AUTOMATIC);
-	//Z_Pid.SetOutputLimits(-90, 90);
-	//Z_Pid.SetSampleTime(20);
-
-	//accel_Z.setAverageAmount(10);
 
 	delay(500);
 
@@ -473,9 +425,7 @@ void setup() {
 	cmdParser.setOptKeyValue(true);
 
 	init_radio();
-	attachPCINT(digitalPinToPCINT(IRQ_pin), radio_ISR, CHANGE);
 
-	connect_PID_frontend(&axis_x);
 }
 
 void loop() {
@@ -485,18 +435,6 @@ void loop() {
 
 	if (get_accel_data.shouldRun())
 		get_accel_data.run();
-
-	/*
-	if (Z_Pid.Compute()) {
-		if (state == GO_XZ || state == GO_Z) {
-			if (abs(accelZ-aimAccelZ) > thrZ) {
-				servoAngleZ += servoStepZ;
-				servoAngleZ = checkServoAngle(servoAngleZ);
-				servoZ.write(servoAngleZ);
-			}
-		}
-	}
-	*/
 
 	axis_x.process_PID(state == GO_XZ || state == GO_X);
 
@@ -516,6 +454,7 @@ void loop() {
 
 	if (pid_frontend_processing.shouldRun())
 		pid_frontend_processing.run();
+
 }
 
 float checkServoAngle(float servoAngle) {
@@ -527,9 +466,6 @@ float checkServoAngle(float servoAngle) {
 }
 
 //*********************************************************PID FRONTEND
-/********************************************
- * Serial Communication functions / helpers
- ********************************************/
 
 union {                // This Data structure lets
 	byte asBytes[24];    // us take the byte array
@@ -557,6 +493,7 @@ foo;                   // float array
 //  17-20: float I_Param
 //  21-24: float D_Param
 void pid_frontend_serial_receive(String *buffer) {
+
 	if (buffer->length() == 25) {
 		//buffer->getBytes((unsigned char*)(foo.asBytes),24,1);
 		for (byte i = 1; i < 25; i++)
@@ -610,7 +547,9 @@ void pid_frontend_serial_send() {
 	Serial.print(frontend_axis->pid->GetKd() * kf);
 	Serial.print(" ");
 	if (frontend_axis->pid->GetMode() == AUTOMATIC)
-		Serial.println("Automatic");
+		Serial.print("Automatic");
 	else
-		Serial.println("Manual");
+		Serial.print("Manual");
+	Serial.print(" ");
+	Serial.println((frontend_axis==&axis_x)?"X":"Z");
 }
