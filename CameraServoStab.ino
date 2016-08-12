@@ -88,7 +88,6 @@ void get_accel_Data() {
 }
 
 void serial_Cmd() {
-
 	if (Serial.available()) {
 
 		String buffer_string = Serial.readString();
@@ -130,7 +129,6 @@ void serial_Cmd() {
 		}
 
 	}
-
 }
 
 void serial_Info() {
@@ -167,31 +165,28 @@ void radio_Cmd() {
 
 			Y_moving_speed = abs(Y_moving_val);
 			if (Y_moving_speed > 1) {
-
 				aimAngleY = Y_moving_val > 0 ? 180 : 0;
-
 				if (Y_moving_speed > 8)
 					Y_moving_speed = Y_SPEED_FAST;
 				else if (Y_moving_speed > 4)
 					Y_moving_speed = Y_SPEED_MIDLE;
 				else if (Y_moving_speed > 1)
 					Y_moving_speed = Y_SPEED_SLOW;
-
 				Y_moving.setInterval(Y_moving_speed);
 			} else {
 				aimAngleY = servoAngleY;
 			}
 
-			X_moving_direction = X_moving_val >= 0 ? 1 : -1;
 			X_moving_speed = abs(X_moving_val);
 			if (X_moving_speed > 7) {
+				X_moving_direction = X_moving_val > 0 ? 1 : -1;
 				if (X_moving_speed > 7) {
-					X_moving.setInterval(5);
+					X_moving_speed = 5;
 				} else
-					X_moving.setInterval(25);
-				X_moving.enabled = true;
+					X_moving_speed = 25;
+				X_moving.setInterval(X_moving_speed);
 			} else {
-				X_moving.enabled = false;
+				X_moving_direction = 0;
 			}
 
 			switch (button_0.new_action(button_0_now)) {
@@ -267,6 +262,7 @@ void Y_Moving() {
 			Y_moving_direction = 1;
 		else if (aimAngleY < servoAngleY)
 			Y_moving_direction = -1;
+
 		servoAngleY += Y_moving_direction;
 		servoY.write(servoAngleY);
 		servoAngleY = servoY.read(); //fixing bounds if overflow
@@ -279,22 +275,23 @@ void Y_Moving() {
 		}
 
 	}
-
 }
 
 void X_Moving() {
-	if (state == GO_XZ || state == GO_X) {
-		axis_x.aimAccel += X_moving_direction;
-		if (axis_x.aimAccel > 250)
-			axis_x.aimAccel = 250;
-		if (axis_x.aimAccel < -250)
-			axis_x.aimAccel = -250;
-		axis_x.eemem_data->aim = axis_x.aimAccel;
-	} else {
-		axis_x.servoAngle -= X_moving_direction;
-		axis_x.servo.write(axis_x.servoAngle);
-		axis_x.servoAngle = axis_x.servo.read();
-		axis_x.aimAccel = axis_x.accel;
+	if (X_moving_direction != 0) {
+		if (state == GO_XZ || state == GO_X) { //when leveling is on, changing aimAccel to move
+			axis_x.aimAccel += X_moving_direction * 5;
+			if (axis_x.aimAccel > 250)
+				axis_x.aimAccel = 250;
+			if (axis_x.aimAccel < -250)
+				axis_x.aimAccel = -250;
+			axis_x.eemem_data->aim = axis_x.aimAccel;
+		} else { //when leveling is off using servoAngle to move
+			axis_x.servoAngle -= X_moving_direction;
+			axis_x.servo.write(axis_x.servoAngle);
+			axis_x.servoAngle = axis_x.servo.read(); //fixing bounds if overflow
+			axis_x.aimAccel = axis_x.accel;
+		}
 	}
 }
 
@@ -345,7 +342,6 @@ void initThreads() {
 
 	X_moving.onRun(X_Moving);
 	X_moving.setInterval(100);
-	X_moving.enabled = false;
 	threads_controller.add(&X_moving);
 
 	pid_frontend_processing.onRun(pid_frontend_Processing);
@@ -423,11 +419,15 @@ void connect_PID_frontend(Axis *axis) {
 
 //*********************************************************PID FRONTEND
 
-union {                // This Data structure lets
-	byte asBytes[24];    // us take the byte array
-	float asFloat[6];    // sent from processing and
-}                      // easily convert it to a
-foo;                   // float array
+// This Data structure lets
+// us take the byte array
+// sent from processing and
+// easily convert it to a
+// float array
+union {
+	byte asBytes[24];
+	float asFloat[6];
+} pid_frontend_data;
 
 // getting float values from processing into the arduino
 // was no small task.  the way this program does it is
@@ -438,7 +438,6 @@ foo;                   // float array
 //  * send the bytes to the arduino
 //  * use a data structure known as a union to convert
 //    the array of bytes back into an array of floats
-
 //  the bytes coming from the arduino follow the following
 //  format:
 //  0: 0=Manual, 1=Auto, else = ? error ?
@@ -449,43 +448,32 @@ foo;                   // float array
 //  17-20: float I_Param
 //  21-24: float D_Param
 void pid_frontend_serial_receive(String *buffer) {
-
-	if (buffer->length() == 25) {
-		//buffer->getBytes((unsigned char*)(foo.asBytes),24,1);
+	byte Auto_Man = (*buffer)[0];
+	//check the packet is correct
+	if (buffer->length() == 25 || (Auto_Man == 0 || Auto_Man == 1)) {
+		//read data
 		for (byte i = 1; i < 25; i++)
-			foo.asBytes[i - 1] = byte((*buffer)[i]);
-		// if the information we got was in the correct format,
-		// read it into the system
-		byte Auto_Man = (*buffer)[0];
-		if (Auto_Man == 0 || Auto_Man == 1) {
-			*Setpoint = double(foo.asFloat[0]);
-			//Input=double(foo.asFloat[1]);       // * the user has the ability to send the
-			//   value of "Input"  in most cases (as
-			//   in this one) this is not needed.
-			if (Auto_Man == 0)                // * only change the output if we are in
-					{                            //   manual mode.  otherwise we'll get an
-				*Output = double(foo.asFloat[2]); //   output blip, then the controller will
-			}                                     //   overwrite.
+			pid_frontend_data.asBytes[i - 1] = byte((*buffer)[i]);
 
-			frontend_axis->pid_kp = double(foo.asFloat[3]) / pid_kf;           //
-			frontend_axis->pid_ki = double(foo.asFloat[4]) / pid_kf;           //
-			frontend_axis->pid_kd = double(foo.asFloat[5]) / pid_kf;
+		*Setpoint = double(pid_frontend_data.asFloat[0]);
 
-			frontend_axis->save_pid_tun();
-			//axis_x_eemem.pid_kp = frontend_axis->pid_kp;
-			//axis_x_eemem.pid_ki = frontend_axis->pid_ki;
-			//axis_x_eemem.pid_kd = frontend_axis->pid_kd;
+		frontend_axis->pid_kp = double(pid_frontend_data.asFloat[3]) / pid_kf;
+		frontend_axis->pid_ki = double(pid_frontend_data.asFloat[4]) / pid_kf;
+		frontend_axis->pid_kd = double(pid_frontend_data.asFloat[5]) / pid_kf;
+		frontend_axis->save_pid_tun();
+		frontend_axis->update_pid_tun();
 
-			frontend_axis->update_pid_tun();
-
+		if (Auto_Man == 0) {
+			frontend_axis->pid->SetMode(MANUAL);
+			// * only change the output if we are in
+			//   manual mode.  otherwise we'll get an
+			//   output blip, then the controller will
+			//   overwrite.
 			if (Auto_Man == 0)
-				frontend_axis->pid->SetMode(MANUAL);        // * set the controller mode
-			else
-				frontend_axis->pid->SetMode(AUTOMATIC);             //
-		}
-
+				*Output = double(pid_frontend_data.asFloat[2]);
+		} else
+			frontend_axis->pid->SetMode(AUTOMATIC);
 	}
-
 }
 
 void pid_frontend_serial_send() {
