@@ -47,6 +47,8 @@ Axis axis_x(&axis_x_eemem, THRESHOLD_X);
 Axis_eemem axis_z_eemem EEMEM;
 Axis axis_z(&axis_z_eemem, THRESHOLD_Z);
 
+Axis *frontend_axis;
+
 Servo servoY;
 int Y_moving_speed;
 int Y_moving_direction;
@@ -70,16 +72,12 @@ int prev_state = START_STATE;
 int pid_kf = 100;
 
 byte radio_rx_data[] = { "-10;-10;0;0;0;0;" };
-
 bool got_radio = false;
 
 Button button_0(LONG_PRESS_DELAY);
 Button button_1(LONG_PRESS_DELAY);
 Button button_2(LONG_PRESS_DELAY);
 Button button_3(LONG_PRESS_DELAY);
-
-Axis *frontend_axis;
-double *Setpoint, *Input, *Output;
 
 //********************************* THREADS
 void get_accel_Data() {
@@ -107,9 +105,9 @@ void serial_Cmd() {
 			if (cmdParser.equalCommand_P(PSTR("pid"))) {
 				if (cmdParser.equalCmdParam_P(1, PSTR("fr"))) {
 					if (cmdParser.equalCmdParam_P(2, PSTR("x")))
-						connect_PID_frontend(&axis_x);
+						frontend_axis=&axis_x;
 					if (cmdParser.equalCmdParam_P(2, PSTR("z")))
-						connect_PID_frontend(&axis_z);
+						frontend_axis=&axis_z;
 					pid_frontend = true;
 				}
 			}
@@ -410,14 +408,7 @@ void loop() {
 
 }
 
-void connect_PID_frontend(Axis *axis) {
-	frontend_axis = axis;
-	Setpoint = &axis->aimAccel;
-	Input = &axis->accel;
-	Output = &axis->servoStep;
-}
-
-//*********************************************************PID FRONTEND
+//********************************* PID FRONTEND
 
 // This Data structure lets
 // us take the byte array
@@ -455,7 +446,7 @@ void pid_frontend_serial_receive(String *buffer) {
 		for (byte i = 1; i < 25; i++)
 			pid_frontend_data.asBytes[i - 1] = byte((*buffer)[i]);
 
-		*Setpoint = double(pid_frontend_data.asFloat[0]);
+		frontend_axis->aimAccel = double(pid_frontend_data.asFloat[0]);
 
 		frontend_axis->pid_kp = double(pid_frontend_data.asFloat[3]) / pid_kf;
 		frontend_axis->pid_ki = double(pid_frontend_data.asFloat[4]) / pid_kf;
@@ -470,7 +461,7 @@ void pid_frontend_serial_receive(String *buffer) {
 			//   output blip, then the controller will
 			//   overwrite.
 			if (Auto_Man == 0)
-				*Output = double(pid_frontend_data.asFloat[2]);
+				frontend_axis->servoStep = double(pid_frontend_data.asFloat[2]);
 		} else
 			frontend_axis->pid->SetMode(AUTOMATIC);
 	}
@@ -478,11 +469,11 @@ void pid_frontend_serial_receive(String *buffer) {
 
 void pid_frontend_serial_send() {
 	Serial.print("PID ");
-	Serial.print(*Setpoint);
+	Serial.print(frontend_axis->aimAccel);
 	Serial.print(" ");
-	Serial.print(*Input);
+	Serial.print(frontend_axis->accel);
 	Serial.print(" ");
-	Serial.print(*Output);
+	Serial.print(frontend_axis->servoStep);
 	Serial.print(" ");
 	Serial.print(frontend_axis->pid->GetKp() * pid_kf);
 	Serial.print(" ");
