@@ -95,6 +95,8 @@ void serial_Cmd() {
 
 		pid_frontend_serial_receive(&buffer_string);
 
+		cmdParser.setOptSeperator(' ');
+
 		if (cmdParser.parseCmd((char*) buffer_string.c_str()) != CMDPARSER_ERROR) {
 
 			if (cmdParser.equalCommand_P(PSTR("go")))
@@ -145,106 +147,106 @@ void serial_Info() {
 }
 
 void radio_Cmd() {
-	//todo:refactor to use CmdParser
 	if (got_radio) {
 
-		String radio_cmd = String((char*) radio_rx_data);
+		cmdParser.setOptSeperator(';');
 
-		int Y_moving_val = radio_cmd.substring(0, radio_cmd.indexOf(';')).toInt();
-		Y_moving_speed = abs(Y_moving_val);
-		if (Y_moving_speed > 1) {
+		if (cmdParser.parseCmd((char*) radio_rx_data) != CMDPARSER_ERROR) {
 
-			aimAngleY = Y_moving_val > 0 ? 180 : 0;
+			int Y_moving_val = String(cmdParser.getCmdParam(0)).toInt();
 
-			if (Y_moving_speed > 8)
-				Y_moving_speed = Y_SPEED_FAST;
-			else if (Y_moving_speed > 4)
-				Y_moving_speed = Y_SPEED_MIDLE;
-			else if (Y_moving_speed > 1)
-				Y_moving_speed = Y_SPEED_SLOW;
+			int X_moving_val = String(cmdParser.getCmdParam(1)).toInt();
 
-			Y_moving.setInterval(Y_moving_speed);
-		} else {
-			aimAngleY = servoAngleY;
-		}
+			int button_0_now = String(cmdParser.getCmdParam(2)).toInt();
 
-		radio_cmd = radio_cmd.substring(radio_cmd.indexOf(';') + 1);
-		int X_moving_val = radio_cmd.substring(0, radio_cmd.indexOf(';')).toInt();
-		X_moving_direction = X_moving_val >= 0 ? 1 : -1;
-		X_moving_speed = abs(X_moving_val);
-		if (X_moving_speed > 7) {
+			int button_1_now = String(cmdParser.getCmdParam(3)).toInt();
+
+			int button_2_now = String(cmdParser.getCmdParam(4)).toInt();
+
+			int button_3_now = String(cmdParser.getCmdParam(5)).toInt();
+
+			Y_moving_speed = abs(Y_moving_val);
+			if (Y_moving_speed > 1) {
+
+				aimAngleY = Y_moving_val > 0 ? 180 : 0;
+
+				if (Y_moving_speed > 8)
+					Y_moving_speed = Y_SPEED_FAST;
+				else if (Y_moving_speed > 4)
+					Y_moving_speed = Y_SPEED_MIDLE;
+				else if (Y_moving_speed > 1)
+					Y_moving_speed = Y_SPEED_SLOW;
+
+				Y_moving.setInterval(Y_moving_speed);
+			} else {
+				aimAngleY = servoAngleY;
+			}
+
+			X_moving_direction = X_moving_val >= 0 ? 1 : -1;
+			X_moving_speed = abs(X_moving_val);
 			if (X_moving_speed > 7) {
-				X_moving.setInterval(5);
-			} else
-				X_moving.setInterval(25);
-			X_moving.enabled = true;
-		} else {
-			X_moving.enabled = false;
-		}
+				if (X_moving_speed > 7) {
+					X_moving.setInterval(5);
+				} else
+					X_moving.setInterval(25);
+				X_moving.enabled = true;
+			} else {
+				X_moving.enabled = false;
+			}
 
-		radio_cmd = radio_cmd.substring(radio_cmd.indexOf(';') + 1);
-		int button_0_now = radio_cmd.substring(0, radio_cmd.indexOf(';')).toInt();
+			switch (button_0.new_action(button_0_now)) {
+				case Button::CLICKED:
+					switch (state) {
+						case GO_XZ:
+							state = GO_Z;
+							break;
+						case GO_Z:
+							state = STOP;
+							break;
+						case STOP:
+							axis_x.aimAccel = axis_x.accel;
+							if (button_1_now) {
+								axis_z.aimAccel = axis_z.eemem_data->aim = axis_z.accel;
+								button_1_now = button_1.state = Button::RELEASED;
+							}
+							state = GO_XZ;
+					}
+					break;
+				case Button::LONG_PRESS:
+					break;
+			}
 
-		radio_cmd = radio_cmd.substring(radio_cmd.indexOf(';') + 1);
-		int button_1_now = radio_cmd.substring(0, radio_cmd.indexOf(';')).toInt();
+			switch (button_1.new_action(button_1_now)) {
+				case Button::CLICKED:
+					aimAngleY = Y_preset_1;
+					Y_moving.setInterval(Y_SPEED_FAST);
+					break;
+				case Button::LONG_PRESS:
+					Y_preset_1 = servoAngleY;
+					break;
+			}
 
-		radio_cmd = radio_cmd.substring(radio_cmd.indexOf(';') + 1);
-		int button_2_now = radio_cmd.substring(0, radio_cmd.indexOf(';')).toInt();
+			switch (button_2.new_action(button_2_now)) {
+				case Button::CLICKED:
+					aimAngleY = Y_preset_2;
+					Y_moving.setInterval(Y_SPEED_FAST);
+					break;
+				case Button::LONG_PRESS:
+					Y_preset_2 = servoAngleY;
+					break;
+			}
 
-		radio_cmd = radio_cmd.substring(radio_cmd.indexOf(';') + 1);
-		int button_3_now = radio_cmd.substring(0, radio_cmd.indexOf(';')).toInt();
+			switch (button_3.new_action(button_3_now)) {
+				case Button::CLICKED:
+					aimAngleY = Y_preset_3;
+					Y_moving.setInterval(Y_SPEED_FAST);
+					break;
+				case Button::LONG_PRESS:
+					Y_preset_3 = servoAngleY;
+					break;
+			}
 
-		switch (button_0.new_action(button_0_now)) {
-			case Button::CLICKED:
-				switch (state) {
-					case GO_XZ:
-						state = GO_Z;
-						break;
-					case GO_Z:
-						state = STOP;
-						break;
-					case STOP:
-						axis_x.aimAccel = axis_x.accel;
-						if (button_1_now) {
-							axis_z.aimAccel = axis_z.eemem_data->aim = axis_z.accel;
-							button_1_now = button_1.state = Button::RELEASED;
-						}
-						state = GO_XZ;
-				}
-				break;
-			case Button::LONG_PRESS:
-				break;
-		}
-
-		switch (button_1.new_action(button_1_now)) {
-			case Button::CLICKED:
-				aimAngleY = Y_preset_1;
-				Y_moving.setInterval(Y_SPEED_FAST);
-				break;
-			case Button::LONG_PRESS:
-				Y_preset_1 = servoAngleY;
-				break;
-		}
-
-		switch (button_2.new_action(button_2_now)) {
-			case Button::CLICKED:
-				aimAngleY = Y_preset_2;
-				Y_moving.setInterval(Y_SPEED_FAST);
-				break;
-			case Button::LONG_PRESS:
-				Y_preset_2 = servoAngleY;
-				break;
-		}
-
-		switch (button_3.new_action(button_3_now)) {
-			case Button::CLICKED:
-				aimAngleY = Y_preset_3;
-				Y_moving.setInterval(Y_SPEED_FAST);
-				break;
-			case Button::LONG_PRESS:
-				Y_preset_3 = servoAngleY;
-				break;
-		}
+		};
 
 		got_radio = false;
 
@@ -252,14 +254,15 @@ void radio_Cmd() {
 }
 
 void Y_Moving() {
-	char Y_moving_direction = 0;
 	if (servoAngleY != aimAngleY) {
+
 		if (Y_moving_start) {
 			prev_state = state;
 			state = STOP;
 			Y_moving_start = false;
 		}
 
+		char Y_moving_direction = 0;
 		if (aimAngleY > servoAngleY)
 			Y_moving_direction = 1;
 		else if (aimAngleY < servoAngleY)
@@ -267,14 +270,16 @@ void Y_Moving() {
 		servoAngleY += Y_moving_direction;
 		servoY.write(servoAngleY);
 		servoAngleY = servoY.read(); //fixing bounds if overflow
+
 	} else {
 
-		//todo:fix bug, when speed only changes
 		if (!Y_moving_start) {
 			state = prev_state;
 			Y_moving_start = true;
 		}
+
 	}
+
 }
 
 void X_Moving() {
