@@ -104,4 +104,40 @@ public:
 
 };
 
+class Button {
+public:
+	enum States {
+		RELEASED, PRESSED
+	};
+	enum Actions {
+		CLICKED, LONG_PRESS, NOTHING
+	};
+	unsigned long long_press_delay;
+	States state;
+	unsigned long time;
+	Actions action;
+	Button(unsigned long long_press_delay) {
+		this->long_press_delay = long_press_delay;
+		state = RELEASED;
+		action = NOTHING;
+	}
+	Actions new_action(int current_state) {
+		if (current_state != state) {
+			if (current_state == PRESSED) {
+				time = millis();
+			} else { //RELEASED
+				if (millis() - time > long_press_delay) {
+					action = LONG_PRESS;
+				} else {
+					action = CLICKED;
+				}
+			}
+		} else {
+			action = NOTHING;
+		}
+		state = current_state == 1 ? PRESSED : RELEASED;
+		return action;
+	}
+};
+
 #endif

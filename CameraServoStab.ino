@@ -73,15 +73,10 @@ byte radio_rx_data[] = { "-10;-10;0;0;0;0;" };
 
 bool got_radio = false;
 
-//todo:make class for buttons
-int button_0_state = 0;
-unsigned long button_0_time;
-int button_1_state = 0;
-unsigned long button_1_time;
-int button_2_state = 0;
-unsigned long button_2_time;
-int button_3_state = 0;
-unsigned long button_3_time;
+Button button_0(LONG_PRESS_DELAY);
+Button button_1(LONG_PRESS_DELAY);
+Button button_2(LONG_PRESS_DELAY);
+Button button_3(LONG_PRESS_DELAY);
 
 Axis *frontend_axis;
 double *Setpoint, *Input, *Output;
@@ -199,74 +194,57 @@ void radio_Cmd() {
 		radio_cmd = radio_cmd.substring(radio_cmd.indexOf(';') + 1);
 		int button_3_now = radio_cmd.substring(0, radio_cmd.indexOf(';')).toInt();
 
-		if (button_0_now != button_0_state) {
-			if (button_0_now) { //pressed
-				button_0_time = millis();
-			} else { //released
-				if (millis() - button_0_time > LONG_PRESS_DELAY) {
-
-				} else {
-					switch (state) {
-						case GO_XZ:
-							state = GO_Z;
-							break;
-						case GO_Z:
-							state = STOP;
-							break;
-						case STOP:
-							axis_x.aimAccel = axis_x.accel;
-							if (button_1_now) {
-								axis_z.aimAccel = axis_z.eemem_data->aim = axis_z.accel;
-								button_1_now = button_1_state = 0;
-							}
-							state = GO_XZ;
-					}
+		switch (button_0.new_action(button_0_now)) {
+			case Button::CLICKED:
+				switch (state) {
+					case GO_XZ:
+						state = GO_Z;
+						break;
+					case GO_Z:
+						state = STOP;
+						break;
+					case STOP:
+						axis_x.aimAccel = axis_x.accel;
+						if (button_1_now) {
+							axis_z.aimAccel = axis_z.eemem_data->aim = axis_z.accel;
+							button_1_now = button_1.state = Button::RELEASED;
+						}
+						state = GO_XZ;
 				}
-			}
+				break;
+			case Button::LONG_PRESS:
+				break;
 		}
-		button_0_state = button_0_now;
 
-		if (button_1_now != button_1_state) {
-			if (button_1_now) { //pressed
-				button_1_time = millis();
-			} else { //released
-				if (millis() - button_1_time > LONG_PRESS_DELAY) {
-					Y_preset_1 = servoAngleY;
-				} else {
-					aimAngleY = Y_preset_1;
-					Y_moving.setInterval(Y_SPEED_FAST);
-				}
-			}
+		switch (button_1.new_action(button_1_now)) {
+			case Button::CLICKED:
+				aimAngleY = Y_preset_1;
+				Y_moving.setInterval(Y_SPEED_FAST);
+				break;
+			case Button::LONG_PRESS:
+				Y_preset_1 = servoAngleY;
+				break;
 		}
-		button_1_state = button_1_now;
 
-		if (button_2_now != button_2_state) {
-			if (button_2_now) { //pressed
-				button_2_time = millis();
-			} else { //released
-				if (millis() - button_2_time > LONG_PRESS_DELAY) {
-					Y_preset_2 = servoAngleY;
-				} else {
-					aimAngleY = Y_preset_2;
-					Y_moving.setInterval(Y_SPEED_FAST);
-				}
-			}
+		switch (button_2.new_action(button_2_now)) {
+			case Button::CLICKED:
+				aimAngleY = Y_preset_2;
+				Y_moving.setInterval(Y_SPEED_FAST);
+				break;
+			case Button::LONG_PRESS:
+				Y_preset_2 = servoAngleY;
+				break;
 		}
-		button_2_state = button_2_now;
 
-		if (button_3_now != button_3_state) {
-			if (button_3_now) { //pressed
-				button_3_time = millis();
-			} else { //released
-				if (millis() - button_3_time > LONG_PRESS_DELAY) {
-					Y_preset_3 = servoAngleY;
-				} else {
-					aimAngleY = Y_preset_3;
-					Y_moving.setInterval(Y_SPEED_FAST);
-				}
-			}
+		switch (button_3.new_action(button_3_now)) {
+			case Button::CLICKED:
+				aimAngleY = Y_preset_3;
+				Y_moving.setInterval(Y_SPEED_FAST);
+				break;
+			case Button::LONG_PRESS:
+				Y_preset_3 = servoAngleY;
+				break;
 		}
-		button_3_state = button_3_now;
 
 		got_radio = false;
 
@@ -288,7 +266,7 @@ void Y_Moving() {
 			Y_moving_direction = -1;
 		servoAngleY += Y_moving_direction;
 		servoY.write(servoAngleY);
-		servoAngleY = servoY.read();//fixing bounds if overflow
+		servoAngleY = servoY.read(); //fixing bounds if overflow
 	} else {
 
 		//todo:fix bug, when speed only changes
@@ -310,7 +288,7 @@ void X_Moving() {
 	} else {
 		axis_x.servoAngle -= X_moving_direction;
 		axis_x.servo.write(axis_x.servoAngle);
-		axis_x.servoAngle=axis_x.servo.read();
+		axis_x.servoAngle = axis_x.servo.read();
 		axis_x.aimAccel = axis_x.accel;
 	}
 }
