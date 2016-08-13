@@ -22,7 +22,6 @@
 bool show_info1 = false;
 bool show_info2 = false;
 bool show_info3 = false;
-bool pid_frontend = false;
 
 ThreadController threads_controller = ThreadController();
 
@@ -47,21 +46,17 @@ Axis axis_x(&axis_x_eemem, THRESHOLD_X);
 Axis_eemem axis_z_eemem EEMEM;
 Axis axis_z(&axis_z_eemem, THRESHOLD_Z);
 
-Axis *frontend_axis;
+Axis *pid_frontend_axis;
 
 Servo servoY;
-int Y_moving_speed;
-int Y_moving_direction;
-int aimAngleY;
+int Y_moving_speed, Y_moving_direction, aimAngleY;
 bool Y_moving_start = true;
 int16_e servoAngleY EEMEM;
 uint8_e Y_preset_1 EEMEM;
 uint8_e Y_preset_2 EEMEM;
 uint8_e Y_preset_3 EEMEM;
 
-int X_moving_speed = 0;
-int X_moving_direction = 0;
-bool X_moving_start = true;
+int X_moving_direction = 0, X_moving_speed;
 
 enum STATE {
 	GO_XZ, GO_Z, GO_X, STOP
@@ -80,6 +75,7 @@ Button button_2(LONG_PRESS_DELAY);
 Button button_3(LONG_PRESS_DELAY);
 
 //********************************* THREADS
+
 void get_accel_Data() {
 	axis_x.update_data(accel.getX());
 	axis_z.update_data(accel.getZ());
@@ -105,10 +101,10 @@ void serial_Cmd() {
 			if (cmdParser.equalCommand_P(PSTR("pid"))) {
 				if (cmdParser.equalCmdParam_P(1, PSTR("fr"))) {
 					if (cmdParser.equalCmdParam_P(2, PSTR("x")))
-						frontend_axis=&axis_x;
+						pid_frontend_axis = &axis_x;
 					if (cmdParser.equalCmdParam_P(2, PSTR("z")))
-						frontend_axis=&axis_z;
-					pid_frontend = true;
+						pid_frontend_axis = &axis_z;
+					pid_frontend_processing.enabled = true;
 				}
 			}
 
@@ -301,18 +297,19 @@ void radio_ISR() {
 }
 
 void pid_frontend_Processing() {
-	if (pid_frontend)
-		pid_frontend_serial_send();
+	pid_frontend_serial_send();
 }
+
 //********************************* THREADS
+
 void init_radio() {
 	if (!init_rf(10, 9, 8, sizeof(radio_rx_data))) {
 		Serial.println("Radio chip not found!");
 	} else {
 		attachPCINT(digitalPinToPCINT(IRQ_pin), radio_ISR, CHANGE);
-		Serial.println("Radio connected");
 		changeMode(RX_MODE);
 		setChannel(110);
+		Serial.println("Radio connected");
 	}
 }
 
@@ -362,8 +359,8 @@ void init_accel() {
 	if (!accel.begin()) {
 		Serial.println("No ADXL345 detected ...");
 		while (1);
-
-	}
+	} else
+		Serial.println("Accelerometer connected");
 	accel.setRange(ADXL345_RANGE_2_G);
 	accel.setDataRate(ADXL345_DATARATE_3200_HZ);
 }
@@ -446,45 +443,46 @@ void pid_frontend_serial_receive(String *buffer) {
 		for (byte i = 1; i < 25; i++)
 			pid_frontend_data.asBytes[i - 1] = byte((*buffer)[i]);
 
-		frontend_axis->aimAccel = double(pid_frontend_data.asFloat[0]);
+		pid_frontend_axis->aimAccel = double(pid_frontend_data.asFloat[0]);
 
-		frontend_axis->pid_kp = double(pid_frontend_data.asFloat[3]) / pid_kf;
-		frontend_axis->pid_ki = double(pid_frontend_data.asFloat[4]) / pid_kf;
-		frontend_axis->pid_kd = double(pid_frontend_data.asFloat[5]) / pid_kf;
-		frontend_axis->save_pid_tun();
-		frontend_axis->update_pid_tun();
+		pid_frontend_axis->pid_kp = double(pid_frontend_data.asFloat[3]) / pid_kf;
+		pid_frontend_axis->pid_ki = double(pid_frontend_data.asFloat[4]) / pid_kf;
+		pid_frontend_axis->pid_kd = double(pid_frontend_data.asFloat[5]) / pid_kf;
+		pid_frontend_axis->save_pid_tun();
+		pid_frontend_axis->update_pid_tun();
 
 		if (Auto_Man == 0) {
-			frontend_axis->pid->SetMode(MANUAL);
+			pid_frontend_axis->pid->SetMode(MANUAL);
 			// * only change the output if we are in
 			//   manual mode.  otherwise we'll get an
 			//   output blip, then the controller will
 			//   overwrite.
 			if (Auto_Man == 0)
-				frontend_axis->servoStep = double(pid_frontend_data.asFloat[2]);
+				pid_frontend_axis->servoStep = double(pid_frontend_data.asFloat[2]);
 		} else
-			frontend_axis->pid->SetMode(AUTOMATIC);
+			pid_frontend_axis->pid->SetMode(AUTOMATIC);
 	}
+
 }
 
 void pid_frontend_serial_send() {
 	Serial.print("PID ");
-	Serial.print(frontend_axis->aimAccel);
+	Serial.print(pid_frontend_axis->aimAccel);
 	Serial.print(" ");
-	Serial.print(frontend_axis->accel);
+	Serial.print(pid_frontend_axis->accel);
 	Serial.print(" ");
-	Serial.print(frontend_axis->servoStep);
+	Serial.print(pid_frontend_axis->servoStep);
 	Serial.print(" ");
-	Serial.print(frontend_axis->pid->GetKp() * pid_kf);
+	Serial.print(pid_frontend_axis->pid->GetKp() * pid_kf);
 	Serial.print(" ");
-	Serial.print(frontend_axis->pid->GetKi() * pid_kf);
+	Serial.print(pid_frontend_axis->pid->GetKi() * pid_kf);
 	Serial.print(" ");
-	Serial.print(frontend_axis->pid->GetKd() * pid_kf);
+	Serial.print(pid_frontend_axis->pid->GetKd() * pid_kf);
 	Serial.print(" ");
-	if (frontend_axis->pid->GetMode() == AUTOMATIC)
+	if (pid_frontend_axis->pid->GetMode() == AUTOMATIC)
 		Serial.print("Automatic");
 	else
 		Serial.print("Manual");
 	Serial.print(" ");
-	Serial.println((frontend_axis == &axis_x) ? "X" : "Z");
+	Serial.println((pid_frontend_axis == &axis_x) ? "X" : "Z");
 }

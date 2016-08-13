@@ -18,18 +18,15 @@ struct Axis_eemem {
 class Axis {
 public:
 
-	double accel;
-	double aimAccel;
+	double accel,aimAccel;
 	ResponsiveAnalogRead *input_accel;
 
 	Servo servo;
 	double servoStep;
 	float servoAngle;
 
-	double pid_kp;
-	double pid_ki;
-	double pid_kd;
 	PID *pid;
+	double pid_kp,pid_ki,pid_kd;
 
 	byte threshold;
 
