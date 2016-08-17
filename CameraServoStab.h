@@ -18,7 +18,7 @@ struct Axis_eemem {
 class Axis {
 public:
 
-	double accel,aimAccel;
+	double accel, aimAccel, accelRaw;
 	ResponsiveAnalogRead *input_accel;
 
 	Servo servo;
@@ -26,7 +26,7 @@ public:
 	float servoAngle;
 
 	PID *pid;
-	double pid_kp,pid_ki,pid_kd;
+	double pid_kp, pid_ki, pid_kd;
 
 	byte threshold;
 
@@ -70,6 +70,7 @@ public:
 	}
 
 	void update_data(int data) {
+		accelRaw = data;
 		input_accel->update(data);
 		accel = input_accel->getValue();
 	}

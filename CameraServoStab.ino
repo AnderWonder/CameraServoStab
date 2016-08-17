@@ -341,6 +341,7 @@ void initThreads() {
 
 	pid_frontend_processing.onRun(pid_frontend_Processing);
 	pid_frontend_processing.setInterval(50);
+	pid_frontend_processing.enabled = false;
 	threads_controller.add(&pid_frontend_processing);
 
 }
@@ -375,7 +376,7 @@ void set_default_values_for_eeprom_vars() {
 
 void setup() {
 
-	Serial.begin(9600);
+	Serial.begin(57600);
 	Serial.println("Program start");
 
 	if (eeprom_writen != 9) {
@@ -484,5 +485,7 @@ void pid_frontend_serial_send() {
 	else
 		Serial.print("Manual");
 	Serial.print(" ");
-	Serial.println((pid_frontend_axis == &axis_x) ? "X" : "Z");
+	Serial.print((pid_frontend_axis == &axis_x) ? "X" : "Z");
+	Serial.print(" ");
+	Serial.println(pid_frontend_axis->accelRaw);
 }
